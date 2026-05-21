@@ -256,6 +256,22 @@ def majority_chinese(text):
 search_keys = ["华硕a豆air", "机械革命星耀14", "ipadmini7", "iphone16", "红米note13", "macbookairm4", "华硕灵耀14", "微星星影15"]
 
 
+def click_first_search_reward_item(d):
+    reward_title = d(className="android.widget.TextView", text="搜索后浏览立得奖励")
+    if not reward_title.exists:
+        return False
+    first_item = d.xpath(
+        '(//android.widget.TextView[@text="搜索发现"]/following-sibling::android.widget.ListView)/android.view.View[1]')
+    if first_item.exists:
+        center = first_item.center()
+        print("搜索后浏览立得奖励，点击第一个内容", center)
+        d.click(center[0], center[1])
+        time.sleep(3)
+        return True
+    print("搜索后浏览立得奖励，未找到第一个搜索发现内容")
+    return False
+
+
 def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
     check_can_open(d)
     history_lst = d.xpath(
@@ -274,6 +290,7 @@ def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
                 if search_btn.exists:
                     search_btn.click()
                     time.sleep(2)
+    click_first_search_reward_item(d)
     screen_width, screen_height = d.window_size()
     package_name, _ = get_current_app(d)
     # check_count = 3
@@ -297,6 +314,7 @@ def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
                     time.sleep(2)
                     break
             if time.time() - start_time > duration:
+                print(f"浏览任务达到{duration}秒，准备返回任务页")
                 break
             if is_fish:
                 print("开始查找闲鱼商品")
@@ -333,6 +351,7 @@ def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
                 time.sleep(5)
         except Exception as e:
             time.sleep(5)
+    print("浏览任务结束，调用返回任务页")
     back_func()
 
 
