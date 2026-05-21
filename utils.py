@@ -72,6 +72,14 @@ def check_chars_exist(text, chars=None):
     return False
 
 
+def tmall_no_click(text):
+    chars = ["添加桌面组件", "加速提现", "美团视频"]
+    for char in chars:
+        if char in text:
+            return True
+    return False
+
+
 def get_current_app(d):
     info = d.shell("dumpsys window | grep mCurrentFocus").output
     match = re.search(r'mCurrentFocus=Window\{.*? u0 (.*?)/(.*?)\}', info)
@@ -283,11 +291,16 @@ def click_first_search_reward_item(d):
 
 def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
     check_can_open(d)
-    history_lst = d.xpath(
+    history_lst1 = d.xpath(
         '(//android.widget.TextView[@text="历史搜索"]/following-sibling::android.widget.ListView)/android.view.View[1]')
-    if history_lst.exists:
-        print("查找到搜索关键字", history_lst)
-        history_lst.click()
+    history_lst2 = d.xpath('//android.widget.TextView[@text="猜你想搜"]/following-sibling::android.view.View[1]/android.view.View[1]/android.widget.TextView')
+    if history_lst1.exists:
+        print("查找到搜索关键字", history_lst1)
+        history_lst1.click()
+        time.sleep(2)
+    elif history_lst2.exists:
+        print("查找到搜索关键字", history_lst2.get_text())
+        history_lst2.click()
         time.sleep(2)
     else:
         search_view = d(className="android.view.View", text="搜索有福利")
@@ -302,74 +315,90 @@ def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
     click_first_search_reward_item(d)
     screen_width, screen_height = d.window_size()
     package_name, _ = get_current_app(d)
-    # check_count = 3
-    # while check_count >= 0:
-    #     if not func():
-    #         break
-    #     print(f"检查次数：{check_count}当前在任务页面，没有执行任务。。。")
-    #     check_count -= 1
-    #     if check_count <= 0:
-    #         return
-    #     time.sleep(2)
     start_time = time.time()
     print("开始做任务。。。")
-    while True:
-        try:
-            done_view = d(
-                classNameMatches=r"android.widget.TextView|android.widget.Button|android.view.View",
-                textMatches=r".*(任务已完成|已得).*"
-            )
-            if done_view.exists:
-                print("检测到任务完成提示，结束浏览并返回", done_view.get_text())
-                break
-            bt_open = d(resourceId="android:id/button1", text="浏览器打开")
-            if bt_open.exists:
-                bt_close = d(resourceId="android:id/button2", text="取消")
-                if bt_close.exists:
-                    bt_close.click()
+    browse_view = d(className="android.widget.TextView", textMatches=r"\d+/\d+")
+    if browse_view.exists:
+        browse_text = browse_view.get_text()
+        browse_count = int(re.findall(r"\d+/(\d+)", browse_text)[0])
+        try_count = 0
+        while try_count < browse_count:
+            try:
+                commodity_view = next(
+                    (xv for xv in [
+                        d.xpath(f'//android.view.View[@resource-id="root"]/android.view.View[5]/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[{try_count + 1}]'),
+                        d.xpath(f'//android.view.View[@resource-id="root"]/android.view.View[4]/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[{try_count + 1}]'),
+                        d.xpath(f'//android.view.View[@resource-id="root"]/android.view.View[5]/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[2]/android.view.View[{try_count - 2}]'),
+                        d.xpath(f'//android.view.View[@resource-id="root"]/android.view.View[4]/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[2]/android.view.View[{try_count - 2}]'),
+                    ] if xv and xv.exists),
+                    None
+                )
+                if commodity_view and commodity_view.exists:
+                    print(f"点击商品{try_count}")
+                    commodity_view.click()
                     time.sleep(2)
+                    d.press("back")
+                    time.sleep(3)
+                try_count += 1
+            except Exception as e:
+                print(str(e))
+    else:
+        while True:
+            try:
+                done_view = d(
+                    classNameMatches=r"android.widget.TextView|android.widget.Button|android.view.View",
+                    textMatches=r".*(任务已完成|已得).*"
+                )
+                if done_view.exists:
+                    print("检测到任务完成提示，结束浏览并返回", done_view.get_text())
                     break
-            if time.time() - start_time > duration:
-                print(f"浏览任务达到{duration}秒，准备返回任务页")
-                break
-            if is_fish:
-                print("开始查找闲鱼商品")
-                time.sleep(4)
-                commodity_view1 = d.xpath("//android.widget.ListView/android.view.View[1]")
-                if commodity_view1.exists:
-                    print(f"存在commodity_view1，点击{commodity_view1.center()}")
-                    commodity_view1.click()
-                    time.sleep(18)
+                bt_open = d(resourceId="android:id/button1", text="浏览器打开")
+                if bt_open.exists:
+                    bt_close = d(resourceId="android:id/button2", text="取消")
+                    if bt_close.exists:
+                        bt_close.click()
+                        time.sleep(2)
+                        break
+                if time.time() - start_time > duration:
+                    print(f"浏览任务达到{duration}秒，准备返回任务页")
                     break
-                commodity_view2 = d(className="android.view.View", resourceId="feedsContainer")
-                if commodity_view2.exists:
-                    print(f"存在commodity_view2，点击{(100, commodity_view2.center()[1])}")
-                    d.click(300, commodity_view2.center()[1])
-                    time.sleep(18)
-                    break
-            if package_name == origin_app or package_name == TMALL_APP:
-                if package_name == ALIPAY_APP:
-                    screen_image = d.screenshot(format='opencv')
-                    pt1, _, _ = find_button_multiscale(screen_image, "./img/alipay_get.png")
-                    if pt1:
-                        print("检测到立即领取的弹框，点击立即领取")
-                        d.click(int(pt1[0]) + 50, int(pt1[1]) + 20)
-                        time.sleep(1)
-                start_x = random.randint(screen_width // 6, screen_width // 2)
-                start_y = random.randint(screen_height // 2, screen_height - screen_height // 4)
-                end_x = random.randint(start_x - 100, start_x)
-                end_y = random.randint(200, start_y - 300)
-                swipe_time = random.uniform(0.4, 1) if end_y - start_y > 500 else random.uniform(0.2, 0.5)
-                print("模拟滑动", start_x, start_y, end_x, end_y, swipe_time)
-                d.swipe(start_x, start_y, end_x, end_y, swipe_time)
-                time.sleep(random.uniform(0.8, 2))
-            else:
+                if is_fish:
+                    print("开始查找闲鱼商品")
+                    time.sleep(4)
+                    commodity_view1 = d.xpath("//android.widget.ListView/android.view.View[1]")
+                    if commodity_view1.exists:
+                        print(f"存在commodity_view1，点击{commodity_view1.center()}")
+                        commodity_view1.click()
+                        time.sleep(18)
+                        break
+                    commodity_view2 = d(className="android.view.View", resourceId="feedsContainer")
+                    if commodity_view2.exists:
+                        print(f"存在commodity_view2，点击{(100, commodity_view2.center()[1])}")
+                        d.click(300, commodity_view2.center()[1])
+                        time.sleep(18)
+                        break
+                if package_name == origin_app or package_name == TMALL_APP:
+                    if package_name == ALIPAY_APP:
+                        screen_image = d.screenshot(format='opencv')
+                        pt1, _, _ = find_button_multiscale(screen_image, "./img/alipay_get.png")
+                        if pt1:
+                            print("检测到立即领取的弹框，点击立即领取")
+                            d.click(int(pt1[0]) + 50, int(pt1[1]) + 20)
+                            time.sleep(1)
+                    start_x = random.randint(screen_width // 6, screen_width // 2)
+                    start_y = random.randint(screen_height // 2, screen_height - screen_height // 4)
+                    end_x = random.randint(start_x - 100, start_x)
+                    end_y = random.randint(200, start_y - 300)
+                    swipe_time = random.uniform(0.4, 1) if end_y - start_y > 500 else random.uniform(0.2, 0.5)
+                    print("模拟滑动", start_x, start_y, end_x, end_y, swipe_time)
+                    d.swipe(start_x, start_y, end_x, end_y, swipe_time)
+                    time.sleep(random.uniform(0.8, 2))
+                else:
+                    time.sleep(5)
+            except Exception:
                 time.sleep(5)
-        except Exception as e:
-            time.sleep(5)
     print("浏览任务结束，调用返回任务页")
     back_func()
-
 
 def back_to_video(d):
     while True:
