@@ -31,8 +31,15 @@ urllib.request.install_opener(opener)
 
 # from paddleocr import PaddleOCR
 from PIL import Image
-import easyocr
-easyocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=True)
+easyocr_reader = None
+
+
+def get_easyocr_reader():
+    global easyocr_reader
+    if easyocr_reader is None:
+        import easyocr
+        easyocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+    return easyocr_reader
 
 
 # 关闭 ppocr 的所有日志（推荐）
@@ -184,7 +191,8 @@ def find_text_position(image, text):
 
 
 def find_text_by_easyocr(screenshot, target_text):
-    results = easyocr_reader.readtext(screenshot, detail=1)  # detail=1返回详细信息
+    reader = get_easyocr_reader()
+    results = reader.readtext(screenshot, detail=1)  # detail=1返回详细信息
     for bbox, text, confidence in results:
         if target_text in text:
             print(f"找到文字: '{text}' (置信度: {confidence:.2f})")
@@ -236,7 +244,8 @@ def check_can_open(d):
 def easy_ocr(image):
     if isinstance(image, Image.Image):
         image = np.array(image)
-    result = easyocr_reader.readtext(image)
+    reader = get_easyocr_reader()
+    result = reader.readtext(image)
     text = ' '.join([res[1] for res in result])  # 直接拼接文字
     return text
 
@@ -289,6 +298,13 @@ def task_loop(d, back_func, origin_app=TB_APP, is_fish=False, duration=22):
     print("开始做任务。。。")
     while True:
         try:
+            done_view = d(
+                classNameMatches=r"android.widget.TextView|android.widget.Button|android.view.View",
+                textMatches=r".*(任务已完成|已得).*"
+            )
+            if done_view.exists:
+                print("检测到任务完成提示，结束浏览并返回", done_view.get_text())
+                break
             bt_open = d(resourceId="android:id/button1", text="浏览器打开")
             if bt_open.exists:
                 bt_close = d(resourceId="android:id/button2", text="取消")
