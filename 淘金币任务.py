@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2114"
+VERSION = "coin-row-xml-log-20260525-2119"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -169,6 +169,14 @@ def get_page_texts(limit=120):
 
 def has_any(texts, keys):
     return any(key in text for text in texts for key in keys)
+
+
+def task_click_key(task_name):
+    text = re.sub(r"\s+", "", task_name or "")
+    match = re.search(r"([^，。；;（）()]{2,40})[（(]0/\d+[）)]", text)
+    if match:
+        return match.group(0)
+    return text[:80]
 
 
 def skip_task_name(task_name):
@@ -703,8 +711,9 @@ def find_task_action_button():
         if click_key in invalid_click_keys:
             print("跳过刚才点击无效的动作按钮", task_name, target_bounds)
             continue
-        if have_clicked.get(task_name, 0) >= 2:
-            print("跳过已点击多次任务", task_name, have_clicked[task_name])
+        clicked_key = task_click_key(task_name)
+        if have_clicked.get(clicked_key, 0) >= 2:
+            print("跳过已点击多次任务", task_name, clicked_key, have_clicked[clicked_key])
             continue
         return XmlClickTarget(target_bounds), task_name
     return None, None
@@ -968,7 +977,9 @@ def main_loop():
             if action_view:
                 print("点击按钮", task_name)
                 set_action("clicking_task", current_task=task_name)
-                have_clicked[task_name] = have_clicked.get(task_name, 0) + 1
+                clicked_key = task_click_key(task_name)
+                have_clicked[clicked_key] = have_clicked.get(clicked_key, 0) + 1
+                print("记录任务点击次数", clicked_key, have_clicked[clicked_key])
                 bounds = action_view.bounds()
                 action_view.click()
                 handle_after_task_click(task_name, f"action:{bounds}")
@@ -984,8 +995,9 @@ def main_loop():
                 if click_key in invalid_click_keys:
                     print("跳过刚才点击无效的金币任务行", row_task_name, row_bounds, row_combined)
                     continue
-                if have_clicked.get(row_task_name, 0) >= 2:
-                    print("跳过已点击多次金币任务行", row_task_name, have_clicked[row_task_name])
+                clicked_key = task_click_key(row_task_name)
+                if have_clicked.get(clicked_key, 0) >= 2:
+                    print("跳过已点击多次金币任务行", row_task_name, clicked_key, have_clicked[clicked_key])
                     continue
                 if row_bounds[3] >= screen_height - 20:
                     print("金币任务行贴近屏幕底部，先下翻露出完整行", row_task_name, row_bounds, row_combined)
@@ -994,7 +1006,8 @@ def main_loop():
                     break
                 print("点击金币任务行", row_task_name, row_bounds, row_combined)
                 set_action("clicking_task", current_task=row_task_name)
-                have_clicked[row_task_name] = have_clicked.get(row_task_name, 0) + 1
+                have_clicked[clicked_key] = have_clicked.get(clicked_key, 0) + 1
+                print("记录任务点击次数", clicked_key, have_clicked[clicked_key])
                 d.click(*center(row_bounds))
                 handle_after_task_click(row_task_name, click_key)
                 clicked_row = True
