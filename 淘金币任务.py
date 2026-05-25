@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2043"
+VERSION = "coin-row-xml-log-20260525-2114"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -132,6 +132,17 @@ def parse_bounds(bounds_text):
 
 def center(bounds):
     return ((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
+
+
+class XmlClickTarget:
+    def __init__(self, bounds):
+        self._bounds = bounds
+
+    def bounds(self):
+        return self._bounds
+
+    def click(self):
+        d.click(*center(self._bounds))
 
 
 def dump_root():
@@ -638,41 +649,64 @@ def handle_shop_subscribe_task():
 
 
 def find_task_action_button():
-    buttons = d(classNameMatches=ACTION_CLASS, textMatches=action_text_pattern())
-    if not buttons.exists:
+    root = dump_root()
+    if root is None:
         return None, None
-    print(f"任务动作按钮匹配到{len(buttons)}个")
-    for index, view in enumerate(buttons):
-        try:
-            button_text = view.get_text() or ""
-            bounds = view.bounds()
-        except Exception as exc:
-            print("读取任务按钮失败，跳过", exc)
+    parent = {child: node for node in root.iter("node") for child in node}
+    text_nodes = []
+    candidates = []
+    for node in root.iter("node"):
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        fields = [
+            node.attrib.get("text") or "",
+            node.attrib.get("content-desc") or "",
+            node.attrib.get("resource-id") or "",
+            node.attrib.get("class") or "",
+        ]
+        visible_text = fields[0] or fields[1] or fields[2] or fields[3]
+        if bounds and fields[0]:
+            text_nodes.append((bounds, fields[0]))
+        if not bounds or bounds[1] < 140:
             continue
-        task_name = button_text
-        try:
-            sibling = view.sibling(className="android.view.View", instance=0).child(className="android.widget.TextView", instance=0)
-            if sibling.exists:
-                sibling_text = sibling.get_text()
-                if sibling_text:
-                    task_name = f"{button_text} {sibling_text}".strip()
-        except Exception:
-            pass
-        print("任务动作按钮候选", index, task_name, bounds)
+        if not any(re.search(action_text_pattern(), field) for field in fields if field):
+            continue
+        target = node
+        target_bounds = bounds
+        while target is not None and target.attrib.get("clickable") != "true":
+            target = parent.get(target)
+            target_bounds = parse_bounds(target.attrib.get("bounds")) if target is not None else None
+        if target is None or not target_bounds:
+            continue
+        candidates.append((target_bounds, bounds, visible_text))
+
+    print(f"任务动作按钮XML匹配到{len(candidates)}个")
+    seen = set()
+    for index, (target_bounds, text_bounds, button_text) in enumerate(sorted(candidates, key=lambda item: (item[0][1], item[0][0]))):
+        if target_bounds in seen:
+            continue
+        seen.add(target_bounds)
+        button_y = (text_bounds[1] + text_bounds[3]) // 2
+        row_texts = [
+            text
+            for bounds, text in text_nodes
+            if abs(((bounds[1] + bounds[3]) // 2) - button_y) <= 120
+        ]
+        task_name = " ".join(row_texts) or button_text
+        print("任务动作按钮候选", index, task_name, target_bounds)
         if skip_task_name(task_name):
             print("跳过任务，不点击动作按钮", task_name)
             continue
         if task_is_done_text(task_name):
             print("跳过已完成动作按钮", task_name)
             continue
-        click_key = f"action:{bounds}"
+        click_key = f"action:{target_bounds}"
         if click_key in invalid_click_keys:
-            print("跳过刚才点击无效的动作按钮", task_name, bounds)
+            print("跳过刚才点击无效的动作按钮", task_name, target_bounds)
             continue
         if have_clicked.get(task_name, 0) >= 2:
             print("跳过已点击多次任务", task_name, have_clicked[task_name])
             continue
-        return view, task_name
+        return XmlClickTarget(target_bounds), task_name
     return None, None
 
 
