@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2023"
+VERSION = "coin-row-xml-log-20260525-2036"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -277,6 +277,13 @@ def looks_like_task_list_page(texts=None):
     return has_any(texts, rule_list("task_list_words")) or looks_like_daily_task_list_by_xml()
 
 
+def looks_like_shop_subscribe_task(texts):
+    words = rule_list("shop_subscribe_words", ["订阅+", "进店", "已关注", "取消关注", "最多还可以领", "立即领"])
+    if not has_any(texts, words):
+        return False
+    return any(re.search(r"订阅\s*\+\s*\d+", text) for text in texts) or has_any(texts, ["取消关注", "最多还可以领", "立即领"])
+
+
 def classify_current_page():
     package_name, activity_name = get_current_app(d)
     texts = get_page_texts(120)
@@ -290,6 +297,10 @@ def classify_current_page():
         return page_type, package_name, activity_name, texts
     if has_any(texts, rule_list("quiz_words", ["淘金币趣味答题", "我选好了"])):
         page_type = "quiz"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
+    if looks_like_shop_subscribe_task(texts):
+        page_type = "shop_subscribe_task"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
     if looks_like_task_list_page(texts):
@@ -549,6 +560,54 @@ def handle_quiz_answer():
     return True
 
 
+def shop_subscribe_swipe_check():
+    for _ in range(2):
+        d.swipe(screen_width // 2, int(screen_height * 0.72), screen_width // 2, int(screen_height * 0.36), 0.25)
+        time.sleep(0.4)
+        d.swipe(screen_width // 2, int(screen_height * 0.36), screen_width // 2, int(screen_height * 0.72), 0.25)
+        time.sleep(0.4)
+
+
+def click_first_text(pattern, label, timeout=0.6):
+    target = d(classNameMatches=ACTION_CLASS, textMatches=pattern)
+    if target.exists(timeout=timeout):
+        print("点击店铺订阅任务按钮", label, target.get_text(), target.bounds())
+        target.click()
+        time.sleep(1.2)
+        return True
+    return False
+
+
+def handle_shop_subscribe_task():
+    set_action("doing_shop_subscribe_task")
+    print("开始处理店铺订阅任务")
+    for _ in range(8):
+        if should_stop():
+            return
+        wait_if_paused()
+        texts = get_page_texts(80)
+        print("店铺订阅任务页面文本", texts[:12])
+        if click_first_text(r"最多还可以领.*", "最多还可以领"):
+            continue
+        if click_first_text(r"立即领.*", "立即领"):
+            shop_subscribe_swipe_check()
+            continue
+        if click_first_text(r"订阅\s*\+\s*\d+.*", "订阅"):
+            shop_subscribe_swipe_check()
+            continue
+        if click_first_text(r"进店.*", "进店"):
+            shop_subscribe_swipe_check()
+            continue
+        if click_first_text(r"已关注.*", "已关注"):
+            continue
+        if click_first_text(r"取消关注.*", "取消关注"):
+            shop_subscribe_swipe_check()
+            break
+        print("店铺订阅任务未找到目标按钮，准备返回")
+        break
+    back_to_task()
+
+
 def find_task_action_button():
     buttons = d(classNameMatches=ACTION_CLASS, textMatches=action_text_pattern())
     if not buttons.exists:
@@ -661,6 +720,9 @@ def handle_after_task_click(task_name, click_key=None):
         handle_quiz_answer()
         back_to_task()
         return
+    if page_type == "shop_subscribe_task":
+        handle_shop_subscribe_task()
+        return
     if page_type == "task_done":
         back_to_task()
         return
@@ -704,6 +766,11 @@ def back_to_task():
             continue
         if page_type == "taobao_browse_task":
             print("返回任务页时仍在浏览任务页，先后退回任务列表")
+            d.press("back")
+            time.sleep(1.5)
+            continue
+        if page_type == "shop_subscribe_task":
+            print("返回任务页时仍在店铺订阅任务页，先后退回任务列表")
             d.press("back")
             time.sleep(1.5)
             continue
@@ -792,6 +859,9 @@ def main_loop():
             if page_type == "quiz":
                 handle_quiz_answer()
                 back_to_task()
+                continue
+            if page_type == "shop_subscribe_task":
+                handle_shop_subscribe_task()
                 continue
             if page_type == "task_done":
                 back_to_task()
