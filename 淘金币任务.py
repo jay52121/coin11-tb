@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2129"
+VERSION = "coin-row-xml-log-20260525-2139"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -134,6 +134,10 @@ def center(bounds):
     return ((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
 
 
+def contains_bounds(outer, inner):
+    return outer and inner and outer[0] <= inner[0] and outer[1] <= inner[1] and outer[2] >= inner[2] and outer[3] >= inner[3]
+
+
 class XmlClickTarget:
     def __init__(self, bounds):
         self._bounds = bounds
@@ -169,6 +173,15 @@ def get_page_texts(limit=120):
 
 def has_any(texts, keys):
     return any(key in text for text in texts for key in keys)
+
+
+def node_text_value(node):
+    return (
+        node.attrib.get("text")
+        or node.attrib.get("content-desc")
+        or node.attrib.get("resource-id")
+        or ""
+    )
 
 
 def task_click_key(task_name):
@@ -661,7 +674,6 @@ def find_task_action_button():
     if root is None:
         return None, None
     parent = {child: node for node in root.iter("node") for child in node}
-    text_nodes = []
     candidates = []
     for node in root.iter("node"):
         bounds = parse_bounds(node.attrib.get("bounds"))
@@ -672,8 +684,6 @@ def find_task_action_button():
             node.attrib.get("class") or "",
         ]
         visible_text = fields[0] or fields[1] or fields[2] or fields[3]
-        if bounds and fields[0]:
-            text_nodes.append((bounds, fields[0]))
         if not bounds or bounds[1] < 140:
             continue
         if not any(re.search(action_text_pattern(), field) for field in fields if field):
@@ -685,22 +695,17 @@ def find_task_action_button():
             target_bounds = parse_bounds(target.attrib.get("bounds")) if target is not None else None
         if target is None or not target_bounds:
             continue
-        candidates.append((target_bounds, bounds, visible_text))
+        candidates.append((node, target_bounds, bounds, visible_text))
 
     print(f"任务动作按钮XML匹配到{len(candidates)}个")
     seen = set()
-    for index, (target_bounds, text_bounds, button_text) in enumerate(sorted(candidates, key=lambda item: (item[0][1], item[0][0]))):
+    for index, (action_node, target_bounds, text_bounds, button_text) in enumerate(sorted(candidates, key=lambda item: (item[1][1], item[1][0]))):
         if target_bounds in seen:
             continue
         seen.add(target_bounds)
-        button_y = (text_bounds[1] + text_bounds[3]) // 2
-        row_texts = [
-            text
-            for bounds, text in text_nodes
-            if abs(((bounds[1] + bounds[3]) // 2) - button_y) <= 120
-        ]
-        task_name = " ".join(row_texts) or button_text
-        print("任务动作按钮候选", index, task_name, target_bounds)
+        row_bounds = find_action_row_bounds(action_node, parent, text_bounds)
+        task_name = collect_row_text(root, row_bounds, fallback=button_text)
+        print("任务动作按钮候选", index, task_name, "button", target_bounds, "row", row_bounds)
         if skip_task_name(task_name):
             print("跳过任务，不点击动作按钮", task_name)
             continue
@@ -717,6 +722,36 @@ def find_task_action_button():
             continue
         return XmlClickTarget(target_bounds), task_name
     return None, None
+
+
+def find_action_row_bounds(action_node, parent, action_bounds):
+    target = parent.get(action_node)
+    best_bounds = None
+    while target is not None:
+        bounds = parse_bounds(target.attrib.get("bounds"))
+        if bounds and contains_bounds(bounds, action_bounds):
+            width = bounds[2] - bounds[0]
+            height = bounds[3] - bounds[1]
+            if bounds[0] <= 120 and width >= screen_width * 0.55 and 80 <= height <= 360:
+                best_bounds = bounds
+                break
+        target = parent.get(target)
+    return best_bounds or action_bounds
+
+
+def collect_row_text(root, row_bounds, fallback=""):
+    items = []
+    for node in root.iter("node"):
+        text = node_text_value(node)
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not text or not bounds or not contains_bounds(row_bounds, bounds):
+            continue
+        if text.startswith("O1CN"):
+            continue
+        items.append((bounds[1], bounds[0], text))
+    items.sort(key=lambda item: (item[0], item[1]))
+    combined = " ".join(text for _, _, text in items)
+    return combined or fallback
 
 
 def find_coin_row_buttons():
