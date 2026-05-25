@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2036"
+VERSION = "coin-row-xml-log-20260525-2037"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -581,30 +581,45 @@ def click_first_text(pattern, label, timeout=0.6):
 def handle_shop_subscribe_task():
     set_action("doing_shop_subscribe_task")
     print("开始处理店铺订阅任务")
-    for _ in range(8):
+    idle_count = 0
+    loop_count = 0
+    while idle_count < 3 and loop_count < 40:
+        loop_count += 1
         if should_stop():
             return
         wait_if_paused()
         texts = get_page_texts(80)
         print("店铺订阅任务页面文本", texts[:12])
         if click_first_text(r"最多还可以领.*", "最多还可以领"):
+            idle_count = 0
             continue
         if click_first_text(r"立即领.*", "立即领"):
+            idle_count = 0
             shop_subscribe_swipe_check()
             continue
         if click_first_text(r"订阅\s*\+\s*\d+.*", "订阅"):
+            idle_count = 0
             shop_subscribe_swipe_check()
             continue
         if click_first_text(r"进店.*", "进店"):
+            idle_count = 0
             shop_subscribe_swipe_check()
             continue
         if click_first_text(r"已关注.*", "已关注"):
+            idle_count = 0
             continue
         if click_first_text(r"取消关注.*", "取消关注"):
+            idle_count = 0
             shop_subscribe_swipe_check()
-            break
-        print("店铺订阅任务未找到目标按钮，准备返回")
-        break
+            continue
+        if looks_like_shop_subscribe_task(texts):
+            print("店铺订阅任务仍有标识文字，继续滑动查找按钮")
+            idle_count = 0
+            shop_subscribe_swipe_check()
+            continue
+        idle_count += 1
+        print("店铺订阅任务未找到标识文字", idle_count)
+        time.sleep(1)
     back_to_task()
 
 
