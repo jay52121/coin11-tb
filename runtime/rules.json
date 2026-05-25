@@ -134,6 +134,9 @@
     "去逛逛",
     "点击去逛"
   ],
+  "task_list_bottom_words": [
+    "收起更多任务"
+  ],
   "task_done_page_words": [
     "任务已完成",
     "已得"

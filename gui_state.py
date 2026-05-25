@@ -59,6 +59,7 @@ DEFAULT_RULES = {
         "每日来任务面板", "逛清单", "淘金币趣味课堂", "领取奖励", "去完成",
         "去逛逛", "点击去逛",
     ],
+    "task_list_bottom_words": ["收起更多任务"],
     "task_done_page_words": ["任务已完成", "已得"],
     "task_done_exclude_words": ["累计已得", "累积已得"],
     "quiz_words": ["淘金币趣味答题", "我选好了"],
