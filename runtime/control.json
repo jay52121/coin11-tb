@@ -1,0 +1,10 @@
+{
+  "stop": true,
+  "pause": false,
+  "exclude_tags": [
+    "下单",
+    "快手",
+    "评价",
+    "助力"
+  ]
+}

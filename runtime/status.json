@@ -1,0 +1,17 @@
+{
+  "running": false,
+  "paused": false,
+  "activity": "com.taobao.themis.container.app.TMSActivity",
+  "page_type": "taobao_browse_task",
+  "action": "idle",
+  "current_task": "",
+  "version": "coin-row-xml-log-20260525-1711",
+  "exclude_tags": [
+    "下单",
+    "快手",
+    "评价",
+    "助力"
+  ],
+  "last_error": null,
+  "updated_at": "2026-05-25 17:17:28"
+}

@@ -161,3 +161,14 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 .DS_Store
+
+# Local automation runtime artifacts
+logs/*.log
+runtime/*.log
+*.xml
+current_*.png
+after_run_ui.xml
+debug_no_earn.xml
+home_ui.xml
+task_ui.xml
+.venv_cpu_backup/

@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Android UI 自动化控制台</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", sans-serif;
+      background: #f5f6f8;
+      color: #1f2933;
+    }
+    main {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 20px;
+      font-size: 24px;
+    }
+    section {
+      background: #fff;
+      border: 1px solid #d8dee6;
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    button {
+      font-family: "Microsoft YaHei", sans-serif;
+      min-width: 84px;
+      height: 36px;
+      margin-right: 8px;
+      border: 1px solid #b8c2cc;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+    }
+    button.primary {
+      background: #0f766e;
+      color: #fff;
+      border-color: #0f766e;
+    }
+    button.active {
+      background: #e0f2fe;
+      border-color: #0284c7;
+      color: #075985;
+    }
+    input {
+      font-family: "Microsoft YaHei", sans-serif;
+      min-height: 34px;
+      padding: 0 10px;
+      border: 1px solid #b8c2cc;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 96px;
+      box-sizing: border-box;
+      padding: 10px;
+      border: 1px solid #b8c2cc;
+      border-radius: 4px;
+      font-family: "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+      resize: vertical;
+    }
+    .rules-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .rule-name {
+      margin-bottom: 6px;
+      color: #52616f;
+      font-size: 13px;
+    }
+    .rule-help {
+      margin-bottom: 8px;
+      color: #7b8794;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 10px 14px;
+    }
+    .label {
+      color: #52616f;
+    }
+    #logs {
+      margin: 0;
+      max-height: 420px;
+      overflow: auto;
+      font-size: 13px;
+      line-height: 1.45;
+      background: #111827;
+      color: #e5e7eb;
+      padding: 12px;
+      border-radius: 4px;
+      user-select: text;
+      cursor: text;
+    }
+    .log-line {
+      white-space: pre-wrap;
+      word-break: break-word;
+      user-select: text;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Android UI 自动化控制台</h1>
+
+    <section>
+      <button class="primary" onclick="post('/api/start')">启动</button>
+      <button onclick="post('/api/stop')">停止</button>
+      <button onclick="post('/api/pause')">暂停</button>
+      <button onclick="post('/api/resume')">继续</button>
+    </section>
+
+    <section>
+      <div class="grid">
+        <div class="label">当前运行状态</div><div id="running">-</div>
+        <div class="label">当前版本号</div><div id="version">-</div>
+        <div class="label">当前 Activity</div><div id="activity">-</div>
+        <div class="label">当前页面类型</div><div id="page_type">-</div>
+        <div class="label">当前操作</div><div id="action">-</div>
+        <div class="label">当前任务</div><div id="current_task">-</div>
+        <div class="label">排除任务标签</div><div id="exclude_tags">-</div>
+        <div class="label">最后错误</div><div id="last_error">-</div>
+        <div class="label">更新时间</div><div id="updated_at">-</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>最近日志</h2>
+      <button onclick="clearLogs()">清除日志</button>
+      <button id="auto_scroll_btn" class="active" onclick="toggleAutoScroll()">自动滚动：开</button>
+      <div id="logs"></div>
+    </section>
+
+    <section>
+      <h2>排除任务标签</h2>
+      <input id="exclude_input" type="text" value="下单,快手,评价,助力">
+      <button onclick="saveExcludeTags()">保存</button>
+    </section>
+
+    <section>
+      <h2>文字匹配规则</h2>
+      <button onclick="saveRules()">保存规则</button>
+      <button onclick="loadRules()">重新加载</button>
+      <div id="rules" class="rules-grid"></div>
+    </section>
+  </main>
+
+  <script>
+    const runningLabels = {
+      running: '运行中',
+      paused: '已暂停',
+      stopped: '已停止'
+    };
+
+    const pageTypeLabels = {
+      unknown: '未知页面',
+      unknown_taobao_page: '淘宝其他页面',
+      external_app: '任务页 - 三方应用',
+      coin_home: '淘金币首页',
+      daily_task_list: '淘金币任务列表页',
+      taobao_browse_task: '任务页 - 滑动浏览',
+      quiz: '任务页 - 答题',
+      task_done: '任务完成页'
+    };
+
+    const actionLabels = {
+      idle: '空闲',
+      starting: '启动中',
+      finding_entry: '寻找淘金币入口',
+      switching_daily: '切换日常版',
+      finding_task: '寻找任务',
+      scrolling_task_list: '翻页寻找任务',
+      clicking_task: '点击任务',
+      doing_scroll_task: '模拟任务滚动',
+      doing_quiz_task: '执行答题任务',
+      doing_search_task: '执行搜索任务',
+      returning_to_task_list: '回到任务列表页中',
+      paused: '已暂停',
+      stopping: '正在结束',
+      error: '错误'
+    };
+
+    const ruleMeta = {
+      action_text_pattern: ['动作按钮正则', 'pattern', '用于匹配“去完成/去逛逛”等按钮文本；正则命中后作为可点击任务按钮。'],
+      skip_task_words: ['排除任务标签', 'list', '任务名包含任一词就跳过；一行一个词，保存后也同步到状态区。'],
+      skip_task_extra_words: ['排除任务扩展词', 'list', '更长的跳过词库；任务名包含任一词就跳过。'],
+      done_words: ['已完成任务词', 'list', '用于判断任务行/任务名是否已经完成；命中后不再点击该任务。'],
+      search_browse_words: ['搜索浏览页词', 'list', '页面文本包含任一词时，认为是搜索浏览奖励页。'],
+      coin_home_words: ['淘金币首页词', 'list', '页面包含这些词且没有任务区词时，判定为淘金币首页。'],
+      coin_home_task_words: ['首页任务区词', 'list', '用于区分淘金币首页和任务列表/任务区。'],
+      browse_page_words: ['浏览任务页词', 'list', '页面包含任一词时，判定为滑动浏览任务页。'],
+      daily_fast_words: ['日常快速赚词', 'list', '识别今日速赚区域；命中时优先尝试展开更多任务。'],
+      daily_task_area_words: ['日常任务区词', 'list', 'XML 页面包含这些词时，辅助判定为日常任务列表。'],
+      task_list_words: ['任务列表页词', 'list', '页面包含任一词时，判定为淘金币任务列表页。'],
+      task_done_page_words: ['任务完成页词', 'list', '页面文本包含任一词时认为任务完成，但会先排除下面的排除项。'],
+      task_done_exclude_words: ['完成词排除项', 'list', '如果同一文本包含这些词，即使含“已得”也不算完成，例如“累计已得”。'],
+      quiz_words: ['答题页词', 'list', '页面包含任一词时，判定为趣味课堂答题页。'],
+      daily_version_words: ['回日常版词', 'list', '匹配回日常版入口；命中后点击并等待赚更多金币。'],
+      earn_more_words: ['赚更多金币词', 'list', '匹配进入任务列表的“赚更多金币”入口。'],
+      earn_words: ['赚金币词', 'list', '兜底匹配“赚金币”入口。'],
+      expand_words: ['展开词', 'list', '匹配更多任务展开入口；会优先点击可点击父节点。'],
+      reward_button_pattern: ['奖励按钮正则', 'pattern', '匹配“领取奖励/立即领取/点击得”等奖励按钮；正则命中后点击领取。'],
+      ocr_done_text: ['OCR完成文字', 'text', '浏览任务中每 5 秒 OCR 查找该文字；命中后提前返回。']
+    };
+
+    async function post(url) {
+      await fetch(url, { method: 'POST' });
+      await refresh();
+    }
+
+    async function saveExcludeTags() {
+      const value = document.getElementById('exclude_input').value;
+      await fetch('/api/exclude-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exclude_tags: value })
+      });
+      await refresh();
+    }
+
+    async function clearLogs() {
+      await fetch('/api/logs/clear', { method: 'POST' });
+      lastLogText = '';
+      await refresh();
+    }
+
+    function ruleValueToText(value) {
+      return Array.isArray(value) ? value.join('\n') : String(value ?? '');
+    }
+
+    function textToRuleValue(textValue, type) {
+      if (type === 'list') {
+        return textValue.split(/\n|,|，/).map(v => v.trim()).filter(Boolean);
+      }
+      return textValue.trim();
+    }
+
+    async function loadRules() {
+      const stamp = Date.now();
+      const rules = await fetch(`/api/rules?t=${stamp}`, { cache: 'no-store' }).then(r => r.json());
+      const container = document.getElementById('rules');
+      container.replaceChildren(...Object.entries(ruleMeta).map(([key, meta]) => {
+        const wrap = document.createElement('div');
+        const label = document.createElement('div');
+        const help = document.createElement('div');
+        const input = document.createElement('textarea');
+        label.className = 'rule-name';
+        label.textContent = `${meta[0]} (${key})`;
+        help.className = 'rule-help';
+        help.textContent = meta[2];
+        input.dataset.ruleKey = key;
+        input.dataset.ruleType = meta[1];
+        input.value = ruleValueToText(rules[key]);
+        wrap.append(label, help, input);
+        return wrap;
+      }));
+    }
+
+    async function saveRules() {
+      const payload = {};
+      document.querySelectorAll('[data-rule-key]').forEach(input => {
+        payload[input.dataset.ruleKey] = textToRuleValue(input.value, input.dataset.ruleType);
+      });
+      await fetch('/api/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      await loadRules();
+      await refresh();
+    }
+
+    function text(value) {
+      if (value === null || value === undefined || value === '') return '-';
+      return String(value);
+    }
+
+    function label(map, value) {
+      return map[value] || text(value);
+    }
+
+    let lastLogText = '';
+    let selectingLogs = false;
+    let autoScrollLogs = true;
+    let lastBottomAt = 0;
+    const logsElement = document.getElementById('logs');
+    logsElement.addEventListener('pointerdown', () => { selectingLogs = true; });
+    document.addEventListener('pointerup', () => { selectingLogs = false; });
+    logsElement.addEventListener('scroll', () => {
+      const distanceToBottom = logsElement.scrollHeight - logsElement.scrollTop - logsElement.clientHeight;
+      if (distanceToBottom > 20) {
+        setAutoScroll(false);
+        return;
+      }
+      lastBottomAt = Date.now();
+      setAutoScroll(true);
+    });
+
+    function setAutoScroll(enabled) {
+      autoScrollLogs = enabled;
+      const btn = document.getElementById('auto_scroll_btn');
+      btn.textContent = `自动滚动：${enabled ? '开' : '关'}`;
+      btn.classList.toggle('active', enabled);
+    }
+
+    function toggleAutoScroll() {
+      setAutoScroll(!autoScrollLogs);
+      if (autoScrollLogs) {
+        logsElement.scrollTop = logsElement.scrollHeight;
+      }
+    }
+
+    function isSelectingText() {
+      const selection = window.getSelection();
+      return selectingLogs || (selection && !selection.isCollapsed && logsElement.contains(selection.anchorNode));
+    }
+
+    async function refresh() {
+      const stamp = Date.now();
+      let status;
+      let logs;
+      try {
+        status = await fetch(`/api/status?t=${stamp}`, { cache: 'no-store' }).then(r => r.json());
+        logs = await fetch(`/api/logs?limit=100&t=${stamp}`, { cache: 'no-store' }).then(r => r.json());
+      } catch (err) {
+        document.getElementById('last_error').textContent = `刷新失败: ${err.message}`;
+        return;
+      }
+      const runningState = status.running ? (status.paused ? 'paused' : 'running') : 'stopped';
+      document.getElementById('running').textContent = label(runningLabels, runningState);
+      document.getElementById('version').textContent = text(status.version);
+      document.getElementById('activity').textContent = text(status.activity);
+      document.getElementById('page_type').textContent = label(pageTypeLabels, status.page_type);
+      document.getElementById('action').textContent = label(actionLabels, status.action);
+      document.getElementById('current_task').textContent = text(status.current_task);
+      const excludeTags = Array.isArray(status.exclude_tags) ? status.exclude_tags : [];
+      document.getElementById('exclude_tags').textContent = excludeTags.length ? excludeTags.join(', ') : '-';
+      if (document.activeElement !== document.getElementById('exclude_input')) {
+        document.getElementById('exclude_input').value = excludeTags.join(',');
+      }
+      document.getElementById('last_error').textContent = text(status.last_error);
+      document.getElementById('updated_at').textContent = text(status.updated_at);
+
+      const logBox = document.getElementById('logs');
+      const logText = logs.logs.join('\n');
+      if (isSelectingText() || logText === lastLogText) {
+        return;
+      }
+      lastLogText = logText;
+      logBox.replaceChildren(...logs.logs.map(line => {
+        const div = document.createElement('div');
+        div.className = 'log-line';
+        div.textContent = line;
+        return div;
+      }));
+      const distanceToBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight;
+      if (autoScrollLogs) {
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+    }
+
+    refresh();
+    loadRules();
+    setInterval(refresh, 1000);
+  </script>
+</body>
+</html>
