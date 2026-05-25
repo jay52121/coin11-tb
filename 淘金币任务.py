@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2119"
+VERSION = "coin-row-xml-log-20260525-2129"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -162,7 +162,7 @@ def get_page_texts(limit=120):
         text = node.attrib.get("text") or ""
         if text:
             texts.append(text)
-        if len(texts) >= limit:
+        if limit is not None and len(texts) >= limit:
             break
     return texts
 
@@ -1016,7 +1016,7 @@ def main_loop():
             if clicked_row:
                 continue
 
-            debug_texts = get_page_texts(80)
+            debug_texts = get_page_texts(None)
             print("当前页面前20个文本", debug_texts[:20])
             if task_list_is_at_bottom(debug_texts):
                 print("已到任务列表底部，未找到可点击任务，结束本轮")
