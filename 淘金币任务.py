@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2037"
+VERSION = "coin-row-xml-log-20260525-2039"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -278,7 +278,7 @@ def looks_like_task_list_page(texts=None):
 
 
 def looks_like_shop_subscribe_task(texts):
-    words = rule_list("shop_subscribe_words", ["订阅+", "进店", "已关注", "取消关注", "最多还可以领", "立即领"])
+    words = rule_list("shop_subscribe_words", ["订阅+", "已关注", "取消关注", "最多还可以领", "立即领"])
     if not has_any(texts, words):
         return False
     return any(re.search(r"订阅\s*\+\s*\d+", text) for text in texts) or has_any(texts, ["取消关注", "最多还可以领", "立即领"])
@@ -578,6 +578,28 @@ def click_first_text(pattern, label, timeout=0.6):
     return False
 
 
+def shop_subscribe_action_pairs():
+    defaults = [
+        r"最多还可以领.*=>最多还可以领",
+        r"立即领.*=>立即领",
+        r"订阅\s*\+\s*\d+.*=>订阅",
+        r"进店.*=>进店",
+        r"已关注.*=>已关注",
+        r"取消关注.*=>取消关注",
+    ]
+    pairs = []
+    for item in rule_list("shop_subscribe_action_pairs", defaults):
+        if "=>" in item:
+            pattern, label = item.split("=>", 1)
+        else:
+            pattern, label = item, item
+        pattern = pattern.strip()
+        label = label.strip() or pattern
+        if pattern:
+            pairs.append((pattern, label))
+    return pairs
+
+
 def handle_shop_subscribe_task():
     set_action("doing_shop_subscribe_task")
     print("开始处理店铺订阅任务")
@@ -590,27 +612,15 @@ def handle_shop_subscribe_task():
         wait_if_paused()
         texts = get_page_texts(80)
         print("店铺订阅任务页面文本", texts[:12])
-        if click_first_text(r"最多还可以领.*", "最多还可以领"):
-            idle_count = 0
-            continue
-        if click_first_text(r"立即领.*", "立即领"):
-            idle_count = 0
-            shop_subscribe_swipe_check()
-            continue
-        if click_first_text(r"订阅\s*\+\s*\d+.*", "订阅"):
-            idle_count = 0
-            shop_subscribe_swipe_check()
-            continue
-        if click_first_text(r"进店.*", "进店"):
-            idle_count = 0
-            shop_subscribe_swipe_check()
-            continue
-        if click_first_text(r"已关注.*", "已关注"):
-            idle_count = 0
-            continue
-        if click_first_text(r"取消关注.*", "取消关注"):
-            idle_count = 0
-            shop_subscribe_swipe_check()
+        clicked = False
+        for pattern, label in shop_subscribe_action_pairs():
+            if click_first_text(pattern, label):
+                idle_count = 0
+                clicked = True
+                if label not in ["最多还可以领", "已关注"]:
+                    shop_subscribe_swipe_check()
+                break
+        if clicked:
             continue
         if looks_like_shop_subscribe_task(texts):
             print("店铺订阅任务仍有标识文字，继续滑动查找按钮")
