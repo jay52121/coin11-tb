@@ -12,7 +12,7 @@ from gui_state import read_control, read_rules, update_status as write_gui_statu
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-2139"
+VERSION = "coin-row-xml-log-20260526-0112"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -688,6 +688,9 @@ def find_task_action_button():
             continue
         if not any(re.search(action_text_pattern(), field) for field in fields if field):
             continue
+        if bounds[0] < int(screen_width * 0.68):
+            print("跳过非右侧动作文本", visible_text, bounds)
+            continue
         target = node
         target_bounds = bounds
         while target is not None and target.attrib.get("clickable") != "true":
@@ -994,19 +997,6 @@ def main_loop():
                 wait_and_click_earn_more_after_daily()
                 no_task_scroll_count = 0
                 continue
-            if expand_more_coin_tasks():
-                no_task_scroll_count = 0
-                continue
-
-            reward_btn = d(classNameMatches=ACTION_CLASS, textMatches=rule_text("reward_button_pattern", "领取奖励|立即领取|点击得"))
-            if reward_btn.exists(timeout=0.5):
-                print("点击奖励按钮", reward_btn.get_text(), reward_btn.bounds())
-                set_action("clicking_task", current_task=reward_btn.get_text() or "领取奖励")
-                reward_btn.click()
-                finish_count += 1
-                no_task_scroll_count = 0
-                time.sleep(2)
-                continue
 
             action_view, task_name = find_task_action_button()
             if action_view:
@@ -1018,6 +1008,20 @@ def main_loop():
                 bounds = action_view.bounds()
                 action_view.click()
                 handle_after_task_click(task_name, f"action:{bounds}")
+                no_task_scroll_count = 0
+                continue
+
+            reward_btn = d(classNameMatches=ACTION_CLASS, textMatches=rule_text("reward_button_pattern", "领取奖励|立即领取|点击得"))
+            if reward_btn.exists(timeout=0.2):
+                print("点击奖励按钮", reward_btn.get_text(), reward_btn.bounds())
+                set_action("clicking_task", current_task=reward_btn.get_text() or "领取奖励")
+                reward_btn.click()
+                finish_count += 1
+                no_task_scroll_count = 0
+                time.sleep(2)
+                continue
+
+            if expand_more_coin_tasks():
                 no_task_scroll_count = 0
                 continue
 
