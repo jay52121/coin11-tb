@@ -159,5 +159,8 @@
     "展开"
   ],
   "reward_button_pattern": "领取奖励|立即领取|点击得",
-  "ocr_done_text": "任务已完成\n已得"
+  "ocr_done_text": "任务已完成\n已得",
+  "ocr_done_extra_words": [
+    "继续逛逛吧"
+  ]
 }

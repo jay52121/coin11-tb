@@ -27,13 +27,11 @@ def normalize_text(text):
     return text.replace(" ", "").replace("己", "已")
 
 
-def screen_has_text(d, target_text, max_width=900, gpu=True, min_confidence=0.2):
+def image_has_text(image, target_text, max_width=900, gpu=True, min_confidence=0.2):
     timings = {}
     started = time.perf_counter()
-    screenshot = d.screenshot(format="opencv")
-    timings["screenshot"] = time.perf_counter() - started
 
-    resized, scale = resize_for_ocr(screenshot, max_width=max_width)
+    resized, scale = resize_for_ocr(image, max_width=max_width)
     timings["scale"] = scale
 
     ocr_started = time.perf_counter()
@@ -49,3 +47,19 @@ def screen_has_text(d, target_text, max_width=900, gpu=True, min_confidence=0.2)
         if confidence >= min_confidence and compact_target in compact_text:
             hits.append({"text": text, "confidence": float(confidence), "bbox": bbox})
     return bool(hits), hits, timings
+
+
+def screen_has_text(d, target_text, max_width=900, gpu=True, min_confidence=0.2):
+    started = time.perf_counter()
+    screenshot = d.screenshot(format="opencv")
+    screenshot_time = time.perf_counter() - started
+    ok, hits, timings = image_has_text(
+        screenshot,
+        target_text,
+        max_width=max_width,
+        gpu=gpu,
+        min_confidence=min_confidence,
+    )
+    timings["screenshot"] = screenshot_time
+    timings["total"] += screenshot_time
+    return ok, hits, timings

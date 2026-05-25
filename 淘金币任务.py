@@ -7,12 +7,12 @@ import xml.etree.ElementTree as ET
 import uiautomator2 as u2
 
 from phone_alert import notify_phone
-from screen_ocr import get_reader as warmup_ocr_reader, screen_has_text
+from screen_ocr import get_reader as warmup_ocr_reader, image_has_text
 from gui_state import read_control, read_rules, update_status as write_gui_status
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260525-1711"
+VERSION = "coin-row-xml-log-20260525-2023"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -23,6 +23,8 @@ invalid_click_keys = set()
 expanded_more_tasks = False
 finish_count = 0
 start_time_all = time.time()
+ocr_done_event = threading.Event()
+ocr_check_running = False
 
 print(f"淘金币任务脚本版本: {VERSION}")
 selected_device = select_device()
@@ -46,16 +48,22 @@ def warmup_ocr_async():
 warmup_ocr_async()
 
 ctx = d.watch_context()
-ctx.when("O1CN012qVB9n1tvZ8ATEQGu_!!6000000005964-2-tps-144-144").click()
-ctx.when("O1CN01sORayC1hBVsDQRZoO_!!6000000004239-2-tps-426-128.png_").click()
-ctx.when("领取今日奖励").click()
-ctx.when("确认").click()
-ctx.when("确定").click()
-ctx.when("刷新").click()
-ctx.when("点击刷新").click()
-ctx.when(xpath="//android.app.Dialog//android.widget.Button[contains(text(), '-tps-')]").click()
-ctx.when(xpath="//android.app.Dialog//android.widget.Button[@text='关闭']").click()
-ctx.when(xpath="//android.widget.FrameLayout[@resource-id='com.taobao.taobao:id/poplayer_native_state_center_layout_frame_id']//android.widget.ImageView[@content-desc='关闭按钮']").click()
+
+
+def watcher_click_log(name):
+    def action(selector):
+        print("Watcher点击", name)
+        selector.click()
+
+    return action
+
+
+ctx.when("O1CN012qVB9n1tvZ8ATEQGu_!!6000000005964-2-tps-144-144").call(watcher_click_log("图片关闭1"))
+ctx.when("O1CN01sORayC1hBVsDQRZoO_!!6000000004239-2-tps-426-128.png_").call(watcher_click_log("图片关闭2"))
+# Generic text watchers can silently click normal page controls, so keep only narrow close-button rules here.
+ctx.when(xpath="//android.app.Dialog//android.widget.Button[contains(text(), '-tps-')]").call(watcher_click_log("tps弹窗按钮"))
+ctx.when(xpath="//android.app.Dialog//android.widget.Button[@text='关闭']").call(watcher_click_log("弹窗关闭"))
+ctx.when(xpath="//android.widget.FrameLayout[@resource-id='com.taobao.taobao:id/poplayer_native_state_center_layout_frame_id']//android.widget.ImageView[@content-desc='关闭按钮']").call(watcher_click_log("poplayer关闭按钮"))
 ctx.start()
 
 
@@ -181,14 +189,43 @@ def task_done_text_hits(texts):
     return [text for text in texts if any(word in text for word in done_words) and not any(word in text for word in exclude_words)]
 
 
-def ocr_task_done():
+def ocr_task_done(screenshot, screenshot_time=0):
     try:
-        ok, hits, timings = screen_has_text(d, rule_text("ocr_done_text", "任务已完成"), max_width=900, gpu=True, min_confidence=0.2)
-        print("OCR检查任务完成", ok, hits[:2], {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
-        return ok
+        targets = rule_list("ocr_done_text", ["任务已完成"]) + rule_list("ocr_done_extra_words", ["继续逛逛吧"])
+        all_hits = []
+        last_timings = {}
+        for target in targets:
+            ok, hits, timings = image_has_text(screenshot, target, max_width=900, gpu=True, min_confidence=0.2)
+            timings["screenshot"] = screenshot_time
+            timings["total"] += screenshot_time
+            last_timings = timings
+            if hits:
+                all_hits.extend(hits)
+            if ok:
+                print("OCR检查任务完成", True, target, hits[:2], {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
+                return True
+        print("OCR检查任务完成", False, all_hits[:2], {k: round(v, 3) if isinstance(v, float) else v for k, v in last_timings.items()})
+        return False
     except Exception as exc:
         print("OCR检查任务完成失败", exc)
         return False
+
+
+def start_ocr_done_check_async(screenshot, screenshot_time=0):
+    global ocr_check_running
+    if ocr_check_running:
+        return
+    ocr_check_running = True
+
+    def worker():
+        global ocr_check_running
+        try:
+            if ocr_task_done(screenshot, screenshot_time):
+                ocr_done_event.set()
+        finally:
+            ocr_check_running = False
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def looks_like_search_browse_page(texts):
@@ -390,19 +427,22 @@ def expand_more_coin_tasks():
 
 def scroll_task_list_once():
     set_action("scrolling_task_list")
-    print("任务列表下翻一屏")
-    x = int(screen_width * 0.12)
-    d.swipe(x, int(screen_height * 0.86), x, int(screen_height * 0.30), 0.75)
-    time.sleep(0.8)
+    x = max(30, int(screen_width * 0.06))
+    y1 = int(screen_height * 0.84)
+    y2 = int(screen_height * 0.32)
+    print("任务列表左侧下翻一屏", x, y1, x, y2)
+    d.swipe(x, y1, x, y2, 0.45)
+    time.sleep(0.45)
     page_type, package_name, activity_name, texts = classify_current_page()
     print("任务列表翻页后页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
 
 
 def do_one_external_swipe():
     set_action("doing_scroll_task")
-    print("外部/未知任务页只滚动一次")
-    d.swipe(screen_width // 2, int(screen_height * 0.78), screen_width // 2, int(screen_height * 0.38), 0.35)
-    time.sleep(2)
+    for index in range(2):
+        print("外部/未知任务页滚动", index + 1)
+        d.swipe(screen_width // 2, int(screen_height * 0.78), screen_width // 2, int(screen_height * 0.38), 0.35)
+        time.sleep(1)
 
 
 def click_search_discovery_if_exists():
@@ -444,20 +484,15 @@ def browse_task_loop(duration=BROWSE_TASK_DURATION):
     click_search_discovery_if_exists()
     start_time = time.time()
     last_ocr_check = 0
+    ocr_done_event.clear()
     print("开始做任务。。。")
     while time.time() - start_time < duration:
         if should_stop():
             return
         wait_if_paused()
-        texts = get_page_texts(80)
-        if has_task_done_text(texts):
-            print("检测到任务完成提示，结束浏览并返回", task_done_text_hits(texts)[:3])
+        if ocr_done_event.is_set():
+            print("OCR检测到任务已完成，提前返回")
             break
-        if time.time() - last_ocr_check >= 5:
-            last_ocr_check = time.time()
-            if ocr_task_done():
-                print("OCR检测到任务已完成，提前返回")
-                break
         start_x = random.randint(screen_width // 5, screen_width // 2)
         start_y = random.randint(int(screen_height * 0.62), int(screen_height * 0.86))
         end_x = random.randint(max(1, start_x - 100), min(screen_width - 1, start_x + 20))
@@ -467,6 +502,16 @@ def browse_task_loop(duration=BROWSE_TASK_DURATION):
         print(f"模拟滑动 {elapsed}S")
         d.swipe(start_x, start_y, end_x, end_y, swipe_time)
         time.sleep(random.uniform(0.5, 0.9))
+        now = time.time()
+        if now - last_ocr_check >= 5:
+            last_ocr_check = now
+            try:
+                screenshot_started = time.perf_counter()
+                screenshot = d.screenshot(format="opencv")
+                screenshot_time = time.perf_counter() - screenshot_started
+                start_ocr_done_check_async(screenshot, screenshot_time)
+            except Exception as exc:
+                print("OCR截图失败", exc)
     back_to_task()
 
 
@@ -571,6 +616,8 @@ def find_coin_row_buttons():
             child_bounds = parse_bounds(child.attrib.get("bounds"))
             if not text or not child_bounds:
                 continue
+            if child_bounds[1] < top or child_bounds[3] > bottom:
+                continue
             child_texts.append((child_bounds[1], child_bounds[0], text))
             if re.match(r"^\+\d+$", text):
                 has_reward = True
@@ -594,9 +641,9 @@ def find_coin_row_buttons():
         if key in seen:
             continue
         seen.add(key)
-        rows.append((row_bounds, task_name))
+        rows.append((row_bounds, task_name, combined))
     rows.sort(key=lambda item: (item[0][1], item[0][0]))
-    print("XML金币任务行识别", [(bounds, name) for bounds, name in rows[:8]])
+    print("XML金币任务行识别", [(bounds, name) for bounds, name, _ in rows[:8]])
     return rows[:8]
 
 
@@ -799,20 +846,20 @@ def main_loop():
             set_action("finding_task")
             coin_rows = find_coin_row_buttons()
             clicked_row = False
-            for row_bounds, row_task_name in coin_rows:
+            for row_bounds, row_task_name, row_combined in coin_rows:
                 click_key = f"row:{row_bounds}"
                 if click_key in invalid_click_keys:
-                    print("跳过刚才点击无效的金币任务行", row_task_name, row_bounds)
+                    print("跳过刚才点击无效的金币任务行", row_task_name, row_bounds, row_combined)
                     continue
                 if have_clicked.get(row_task_name, 0) >= 2:
                     print("跳过已点击多次金币任务行", row_task_name, have_clicked[row_task_name])
                     continue
                 if row_bounds[3] >= screen_height - 20:
-                    print("金币任务行贴近屏幕底部，先下翻露出完整行", row_task_name, row_bounds)
+                    print("金币任务行贴近屏幕底部，先下翻露出完整行", row_task_name, row_bounds, row_combined)
                     scroll_task_list_once()
                     clicked_row = True
                     break
-                print("点击金币任务行", row_task_name, row_bounds)
+                print("点击金币任务行", row_task_name, row_bounds, row_combined)
                 set_action("clicking_task", current_task=row_task_name)
                 have_clicked[row_task_name] = have_clicked.get(row_task_name, 0) + 1
                 d.click(*center(row_bounds))

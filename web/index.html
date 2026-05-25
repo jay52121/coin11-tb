@@ -212,7 +212,8 @@
       earn_words: ['赚金币词', 'list', '兜底匹配“赚金币”入口。'],
       expand_words: ['展开词', 'list', '匹配更多任务展开入口；会优先点击可点击父节点。'],
       reward_button_pattern: ['奖励按钮正则', 'pattern', '匹配“领取奖励/立即领取/点击得”等奖励按钮；正则命中后点击领取。'],
-      ocr_done_text: ['OCR完成文字', 'text', '浏览任务中每 5 秒 OCR 查找该文字；命中后提前返回。']
+      ocr_done_text: ['OCR完成文字', 'text', '浏览任务中每 5 秒 OCR 查找该文字；命中后提前返回。'],
+      ocr_done_extra_words: ['OCR辅助完成文字', 'list', '同样每 5 秒 OCR 查找；用于完成浮层里的辅助提示。']
     };
 
     async function post(url) {
