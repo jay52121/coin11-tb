@@ -49,6 +49,35 @@ def image_has_text(image, target_text, max_width=900, gpu=True, min_confidence=0
     return bool(hits), hits, timings
 
 
+def read_ocr_results(image, max_width=900, gpu=True, min_confidence=0.2):
+    timings = {}
+    started = time.perf_counter()
+
+    resized, scale = resize_for_ocr(image, max_width=max_width)
+    timings["scale"] = scale
+
+    ocr_started = time.perf_counter()
+    reader = get_reader(gpu=gpu)
+    results = reader.readtext(resized, detail=1, paragraph=False)
+    timings["ocr"] = time.perf_counter() - ocr_started
+    timings["total"] = time.perf_counter() - started
+
+    items = []
+    for bbox, text, confidence in results:
+        if confidence < min_confidence:
+            continue
+        xs = [point[0] for point in bbox]
+        ys = [point[1] for point in bbox]
+        bounds = (
+            int(min(xs) / scale),
+            int(min(ys) / scale),
+            int(max(xs) / scale),
+            int(max(ys) / scale),
+        )
+        items.append({"text": text, "confidence": float(confidence), "bounds": bounds})
+    return items, timings
+
+
 def screen_has_text(d, target_text, max_width=900, gpu=True, min_confidence=0.2):
     started = time.perf_counter()
     screenshot = d.screenshot(format="opencv")

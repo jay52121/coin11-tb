@@ -3,19 +3,23 @@ import sys
 import time
 import os
 import re
+import threading
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from gui_state import (
     BASE_DIR,
     RUN_LOG_PATH,
+    append_key_log,
     append_log,
+    clear_key_log,
     clear_log,
     read_control,
     read_logs,
+    read_key_logs,
     read_rules,
     read_status,
     reset_state,
@@ -29,6 +33,7 @@ app = FastAPI()
 WEB_DIR = BASE_DIR / "web"
 SCRIPT_PATH = BASE_DIR / "淘金币任务.py"
 process = None
+server_restarting = False
 
 if WEB_DIR.exists():
     app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
@@ -52,8 +57,7 @@ def index():
     return FileResponse(WEB_DIR / "index.html")
 
 
-@app.post("/api/start")
-def start_task():
+def start_task_process(source="api"):
     global process
     if process_running():
         return {"ok": True, "status": "running", "message": "任务已在运行"}
@@ -68,7 +72,8 @@ def start_task():
         exclude_tags=control.get("exclude_tags", []),
         last_error=None,
     )
-    append_log("启动淘金币任务")
+    append_log(f"{source}启动淘金币任务")
+    append_key_log(f"{source}启动淘金币任务")
     RUN_LOG_PATH.parent.mkdir(exist_ok=True)
     log_file = RUN_LOG_PATH.open("a", encoding="utf-8", buffering=1)
     env = os.environ.copy()
@@ -87,12 +92,67 @@ def start_task():
     return {"ok": True, "status": "running", "pid": process.pid}
 
 
+def stop_task_process_for_service_restart():
+    global process
+    write_control(stop=True)
+    update_status(action="stopping")
+    append_log("服务重启：请求停止任务")
+    append_key_log("服务重启：请求停止任务")
+    if process_running():
+        deadline = time.time() + 4
+        while time.time() < deadline:
+            if not process_running():
+                break
+            time.sleep(0.2)
+        if process_running():
+            append_log("服务重启：任务未及时退出，强制结束")
+            process.kill()
+            process.wait(timeout=5)
+    update_status(running=False, paused=False, action="idle")
+
+
+def restart_service_worker():
+    time.sleep(0.4)
+    try:
+        stop_task_process_for_service_restart()
+    except Exception as exc:
+        append_log(f"服务重启：停止任务失败 {exc}")
+    log_path = BASE_DIR / "logs" / "gui_server.log"
+    log_path.parent.mkdir(exist_ok=True)
+    log_file = log_path.open("a", encoding="utf-8", buffering=1)
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "gui_server:app", "--host", "127.0.0.1", "--port", "8765"],
+        cwd=str(BASE_DIR),
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        creationflags=creationflags,
+    )
+    os._exit(0)
+
+
+@app.on_event("startup")
+def auto_start_task():
+    start_task_process("服务启动后自动")
+
+
+@app.post("/api/start")
+def start_task():
+    return start_task_process("手动")
+
+
 @app.post("/api/stop")
 def stop_task():
     global process
     write_control(stop=True)
     update_status(action="stopping")
     append_log("请求停止任务")
+    append_key_log("请求停止任务")
     if process_running():
         deadline = time.time() + 5
         while time.time() < deadline:
@@ -123,6 +183,18 @@ def resume_task():
     return {"ok": True, "status": "running" if process_running() else "stopped"}
 
 
+@app.post("/api/service/restart")
+def restart_service(background_tasks: BackgroundTasks):
+    global server_restarting
+    if server_restarting:
+        return {"ok": True, "status": "restarting"}
+    server_restarting = True
+    append_log("请求重启GUI服务")
+    append_key_log("请求重启GUI服务")
+    background_tasks.add_task(restart_service_worker)
+    return {"ok": True, "status": "restarting"}
+
+
 @app.get("/api/status")
 def status():
     data = read_status()
@@ -134,14 +206,20 @@ def status():
 
 
 @app.get("/api/logs")
-def logs(limit: int = Query(default=100, ge=1, le=1000)):
+def logs(limit: int = Query(default=100, ge=1, le=1000), mode: str = Query(default="detail")):
+    if mode == "key":
+        return {"logs": read_key_logs(limit)}
     return {"logs": read_logs(limit)}
 
 
 @app.post("/api/logs/clear")
-def clear_logs():
-    clear_log()
-    append_log("日志已清除")
+def clear_logs(mode: str = Query(default="detail")):
+    if mode == "key":
+        clear_key_log()
+        append_key_log("关键日志已清除")
+    else:
+        clear_log()
+        append_log("日志已清除")
     return {"ok": True}
 
 

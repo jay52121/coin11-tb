@@ -11,6 +11,7 @@ CONTROL_PATH = RUNTIME_DIR / "control.json"
 STATUS_PATH = RUNTIME_DIR / "status.json"
 RULES_PATH = RUNTIME_DIR / "rules.json"
 RUN_LOG_PATH = LOG_DIR / "run.log"
+KEY_LOG_PATH = LOG_DIR / "key.log"
 
 DEFAULT_CONTROL = {
     "stop": False,
@@ -32,7 +33,7 @@ DEFAULT_STATUS = {
 }
 
 DEFAULT_RULES = {
-    "action_text_pattern": "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得",
+    "action_text_pattern": "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐",
     "skip_task_words": ["下单", "快手", "评价", "助力"],
     "skip_task_extra_words": [
         "拉好友", "抢红包", "搜索兴趣商品下单", "买精选商品", "全场3元3件", "固定入口",
@@ -163,16 +164,40 @@ def append_log(message):
         f.write(f"{now_text()} {message}\n")
 
 
+def append_key_log(message):
+    ensure_dirs()
+    with KEY_LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(f"{now_text()} {message}\n")
+
+
 def clear_log():
     ensure_dirs()
     RUN_LOG_PATH.write_text("", encoding="utf-8")
 
 
-def read_logs(limit=100):
+def clear_key_log():
+    ensure_dirs()
+    KEY_LOG_PATH.write_text("", encoding="utf-8")
+
+
+def clean_log_line(line):
+    return "".join(ch for ch in line if ch == "\t" or ch >= " ")
+
+
+def read_log_file(path, limit=100):
     try:
-        lines = RUN_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+        text = path.read_text(encoding="utf-8", errors="replace").replace("\x00", "")
+        lines = [clean_log_line(line) for line in text.splitlines()]
     except FileNotFoundError:
         return []
     if limit <= 0:
         return []
-    return lines[-limit:]
+    return [line for line in lines if line][-limit:]
+
+
+def read_logs(limit=100):
+    return read_log_file(RUN_LOG_PATH, limit)
+
+
+def read_key_logs(limit=100):
+    return read_log_file(KEY_LOG_PATH, limit)

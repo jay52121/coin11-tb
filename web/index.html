@@ -35,12 +35,40 @@
       border: 1px solid #b8c2cc;
       border-radius: 4px;
       background: #fff;
+      color: #1f2933;
       cursor: pointer;
     }
-    button.primary {
+    button:hover:not(:disabled) {
+      filter: brightness(0.96);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    button.success {
       background: #0f766e;
       color: #fff;
       border-color: #0f766e;
+    }
+    button.danger {
+      background: #b91c1c;
+      color: #fff;
+      border-color: #b91c1c;
+    }
+    button.warning {
+      background: #d97706;
+      color: #fff;
+      border-color: #d97706;
+    }
+    button.info {
+      background: #1d4ed8;
+      color: #fff;
+      border-color: #1d4ed8;
+    }
+    button.service {
+      background: #374151;
+      color: #fff;
+      border-color: #374151;
     }
     button.active {
       background: #e0f2fe;
@@ -116,10 +144,11 @@
     <h1>Android UI 自动化控制台</h1>
 
     <section>
-      <button class="primary" onclick="post('/api/start')">启动</button>
-      <button onclick="post('/api/stop')">停止</button>
-      <button onclick="post('/api/pause')">暂停</button>
-      <button onclick="post('/api/resume')">继续</button>
+      <button id="start_btn" class="success" onclick="post('/api/start')">启动</button>
+      <button id="stop_btn" class="danger" onclick="post('/api/stop')">停止</button>
+      <button id="pause_btn" class="warning" onclick="post('/api/pause')">暂停</button>
+      <button id="resume_btn" class="info" onclick="post('/api/resume')">继续</button>
+      <button id="restart_service_btn" class="service" onclick="restartService()">重启服务</button>
     </section>
 
     <section>
@@ -138,6 +167,8 @@
 
     <section>
       <h2>最近日志</h2>
+      <button id="detail_log_btn" class="active" onclick="setLogMode('detail')">详细日志</button>
+      <button id="key_log_btn" onclick="setLogMode('key')">关键日志</button>
       <button onclick="clearLogs()">清除日志</button>
       <button id="auto_scroll_btn" class="active" onclick="toggleAutoScroll()">自动滚动：开</button>
       <div id="logs"></div>
@@ -224,6 +255,17 @@
       await refresh();
     }
 
+    async function restartService() {
+      document.getElementById('restart_service_btn').disabled = true;
+      await fetch('/api/service/restart', { method: 'POST' });
+      document.getElementById('running').textContent = '服务重启中';
+      setTimeout(refresh, 2500);
+    }
+
+    async function autoStartOnLoad() {
+      await post('/api/start');
+    }
+
     async function saveExcludeTags() {
       const value = document.getElementById('exclude_input').value;
       await fetch('/api/exclude-tags', {
@@ -235,8 +277,9 @@
     }
 
     async function clearLogs() {
-      await fetch('/api/logs/clear', { method: 'POST' });
+      await fetch(`/api/logs/clear?mode=${logMode}`, { method: 'POST' });
       lastLogText = '';
+      document.getElementById('logs').replaceChildren();
       await refresh();
     }
 
@@ -296,6 +339,7 @@
     }
 
     let lastLogText = '';
+    let logMode = 'detail';
     let selectingLogs = false;
     let autoScrollLogs = true;
     let lastBottomAt = 0;
@@ -311,6 +355,15 @@
       lastBottomAt = Date.now();
       setAutoScroll(true);
     });
+
+    function setLogMode(mode) {
+      logMode = mode;
+      lastLogText = '';
+      document.getElementById('logs').replaceChildren();
+      document.getElementById('detail_log_btn').classList.toggle('active', mode === 'detail');
+      document.getElementById('key_log_btn').classList.toggle('active', mode === 'key');
+      refresh();
+    }
 
     function setAutoScroll(enabled) {
       autoScrollLogs = enabled;
@@ -337,13 +390,18 @@
       let logs;
       try {
         status = await fetch(`/api/status?t=${stamp}`, { cache: 'no-store' }).then(r => r.json());
-        logs = await fetch(`/api/logs?limit=100&t=${stamp}`, { cache: 'no-store' }).then(r => r.json());
+        logs = await fetch(`/api/logs?limit=100&mode=${logMode}&t=${stamp}`, { cache: 'no-store' }).then(r => r.json());
       } catch (err) {
         document.getElementById('last_error').textContent = `刷新失败: ${err.message}`;
         return;
       }
       const runningState = status.running ? (status.paused ? 'paused' : 'running') : 'stopped';
       document.getElementById('running').textContent = label(runningLabels, runningState);
+      document.getElementById('start_btn').disabled = status.running;
+      document.getElementById('stop_btn').disabled = !status.running;
+      document.getElementById('pause_btn').disabled = !status.running || status.paused;
+      document.getElementById('resume_btn').disabled = !status.running || !status.paused;
+      document.getElementById('restart_service_btn').disabled = false;
       document.getElementById('version').textContent = text(status.version);
       document.getElementById('activity').textContent = text(status.activity);
       document.getElementById('page_type').textContent = label(pageTypeLabels, status.page_type);
@@ -377,6 +435,7 @@
 
     refresh();
     loadRules();
+    setTimeout(autoStartOnLoad, 500);
     setInterval(refresh, 1000);
   </script>
 </body>
