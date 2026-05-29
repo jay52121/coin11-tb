@@ -54,7 +54,15 @@ def read_script_version():
 
 @app.get("/")
 def index():
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@app.middleware("http")
+async def no_cache_static(request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/web/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 def start_task_process(source="api", mode="taojinbi"):
