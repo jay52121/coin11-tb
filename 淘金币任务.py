@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260530-0158"
+VERSION = "coin-row-xml-log-20260530-0211"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -294,7 +294,18 @@ def task_is_done_text(task_name):
         return False
     done_words = rule_list("done_words", ["已完成", "已领取", "已得", "任务已完成", "记得明天再来"])
     exclude_words = rule_list("task_done_exclude_words", ["累计已得", "累积已得"])
-    return "(1/1)" in task_name or (any(word in task_name for word in done_words) and not any(word in task_name for word in exclude_words))
+    count_match = re.search(r"[（(](\d+)/(\d+)[）)]", task_name)
+    count_done = bool(count_match and int(count_match.group(1)) >= int(count_match.group(2)))
+    return count_done or (any(word in task_name for word in done_words) and not any(word in task_name for word in exclude_words))
+
+
+def task_click_limit(task_name):
+    if RUN_MODE == "energy":
+        count_match = re.search(r"[（(](\d+)/(\d+)[）)]", task_name or "")
+        if count_match:
+            total = int(count_match.group(2))
+            return min(max(total + 1, 2), 12)
+    return 2
 
 
 def has_task_done_text(texts):
@@ -662,6 +673,29 @@ def enter_task_list_from_coin_home():
     return False
 
 
+def enter_energy_task_list_from_coin_home(max_wait=8):
+    print("查找赚体力入口，返回做任务赚体力列表")
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        wait_if_paused()
+        if should_stop():
+            return False
+        page_type, package_name, activity_name, texts = classify_current_page()
+        if page_type == "energy_task_list":
+            return True
+        energy_btn = d(classNameMatches=ACTION_CLASS, textMatches="赚体力")
+        if energy_btn.exists(timeout=0.6):
+            bounds = safe_obj_bounds(energy_btn, "赚体力")
+            if bounds:
+                print("点击赚体力进入体力任务列表", safe_obj_text(energy_btn, "赚体力"), bounds)
+                human_click_bounds(bounds)
+                time.sleep(2)
+                continue
+        time.sleep(1)
+    print("未找到赚体力入口，不能切到赚金币")
+    return False
+
+
 def wait_for_task_list_after_entry(max_wait=12):
     print("启动入口后等待页面稳定并查找日常任务入口")
     deadline = time.time() + max_wait
@@ -998,8 +1032,9 @@ def find_task_action_button():
             print("跳过刚才点击无效的动作按钮", task_name, target_bounds)
             continue
         clicked_key = task_click_key(task_name)
-        if have_clicked.get(clicked_key, 0) >= 2:
-            print("跳过已点击多次任务", task_name, clicked_key, have_clicked[clicked_key])
+        click_limit = task_click_limit(task_name)
+        if have_clicked.get(clicked_key, 0) >= click_limit:
+            print("跳过已点击多次任务", task_name, clicked_key, have_clicked[clicked_key], "上限", click_limit)
             continue
         return XmlClickTarget(target_bounds), task_name
     return None, None
@@ -1317,6 +1352,9 @@ def handle_after_task_click(task_name, click_key=None):
         back_to_task()
         return
     if page_type == "coin_home":
+        if RUN_MODE == "energy":
+            enter_energy_task_list_from_coin_home()
+            return
         enter_task_list_from_coin_home()
         return
     do_one_external_swipe()
@@ -1337,6 +1375,9 @@ def back_to_task():
         wait_if_paused()
         loop_count += 1
         if loop_count > 30:
+            if RUN_MODE == "energy":
+                print("返回体力任务页循环过多，停止本次返回，不切到赚金币")
+                return
             print("返回任务页循环过多，使用小插件入口恢复")
             open_coin_home_direct()
             return
@@ -1367,6 +1408,13 @@ def back_to_task():
             time.sleep(1.5)
             continue
         if page_type == "coin_home":
+            if RUN_MODE == "energy":
+                if enter_energy_task_list_from_coin_home():
+                    return
+                print("体力模式未能从首页回到赚体力列表，继续后退")
+                human_back()
+                time.sleep(1.5)
+                continue
             if enter_task_list_from_coin_home():
                 return
         if package_name != TB_APP:
@@ -1395,6 +1443,9 @@ def back_to_task():
             continue
         back_count += 1
         if back_count > BACK_RESTART_LIMIT:
+            if RUN_MODE == "energy":
+                print("体力模式未知页连续后退4次仍无法回到体力列表，停止本次返回")
+                return
             print("淘宝未知页连续后退4次仍无法回到任务页，强制重启淘宝并打开淘金币入口")
             open_coin_home_direct(stop=True)
             return
@@ -1452,13 +1503,13 @@ def energy_task_loop():
     global finish_count
     no_task_scroll_count = 0
     if not ensure_energy_task_list_at_start():
-        return
+        return False
     print("进入做体力任务执行循环")
     while True:
         try:
             if should_stop():
                 print("收到停止请求，退出做体力循环")
-                break
+                return False
             wait_if_paused()
             time.sleep(1)
             page_type, package_name, activity_name, texts = classify_current_page()
@@ -1483,24 +1534,30 @@ def energy_task_loop():
                 if no_task_scroll_count <= 8:
                     scroll_task_list_once()
                     continue
-                print("做体力连续下翻仍未找到可点击按钮，结束本轮")
-                break
+                print("做体力连续下翻仍未找到可点击按钮，认为体力任务已全部完成，准备切换赚金币")
+                append_key_log("做体力任务已完成，切换淘金币任务")
+                have_clicked.clear()
+                invalid_click_keys.clear()
+                return True
             if page_type in ["quiz", "shop_subscribe_task", "task_done", "taobao_browse_task", "external_app", "coin_home", "unknown_taobao_page"]:
                 handle_after_task_click("做体力任务页外处理")
                 continue
             print("做体力模式离开任务列表，结束本轮", page_type)
-            break
+            return False
         except Exception as exc:
             print("做体力循环异常", exc)
             update_status(last_error=str(exc), action="error")
             back_to_task()
+    return False
 
 
 def main_loop():
-    global finish_count
+    global finish_count, RUN_MODE
     if RUN_MODE == "energy":
-        energy_task_loop()
-        return
+        if not energy_task_loop():
+            return
+        RUN_MODE = "taojinbi"
+        print("体力任务完成，开始执行淘金币任务")
     no_task_scroll_count = 0
     coin_home_fail_count = 0
     update_status(running=True, paused=False, action="starting", exclude_tags=get_exclude_tags(), last_error=None)
@@ -1617,8 +1674,9 @@ def main_loop():
                     print("跳过刚才点击无效的金币任务行", row_task_name, row_bounds, row_combined)
                     continue
                 clicked_key = task_click_key(row_task_name)
-                if have_clicked.get(clicked_key, 0) >= 2:
-                    print("跳过已点击多次金币任务行", row_task_name, clicked_key, have_clicked[clicked_key])
+                click_limit = task_click_limit(row_task_name)
+                if have_clicked.get(clicked_key, 0) >= click_limit:
+                    print("跳过已点击多次金币任务行", row_task_name, clicked_key, have_clicked[clicked_key], "上限", click_limit)
                     continue
                 if row_bounds[3] >= screen_height - 20:
                     print("金币任务行贴近屏幕底部，交给OCR右侧按钮兜底", row_task_name, row_bounds, row_combined)
@@ -1644,8 +1702,9 @@ def main_loop():
                     print("OCR跳过已完成任务", action_text, ocr_task_name, bounds)
                     continue
                 clicked_key = task_click_key(ocr_task_name)
-                if have_clicked.get(clicked_key, 0) >= 2:
-                    print("OCR跳过已点击多次任务", action_text, ocr_task_name, clicked_key, have_clicked[clicked_key])
+                click_limit = task_click_limit(ocr_task_name)
+                if have_clicked.get(clicked_key, 0) >= click_limit:
+                    print("OCR跳过已点击多次任务", action_text, ocr_task_name, clicked_key, have_clicked[clicked_key], "上限", click_limit)
                     continue
                 click_key = f"ocr:{clicked_key}:{bounds}"
                 if click_key in invalid_click_keys:
