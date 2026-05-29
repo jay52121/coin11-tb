@@ -57,7 +57,7 @@ def index():
     return FileResponse(WEB_DIR / "index.html")
 
 
-def start_task_process(source="api"):
+def start_task_process(source="api", mode="taojinbi"):
     global process
     if process_running():
         return {"ok": True, "status": "running", "message": "任务已在运行"}
@@ -72,13 +72,15 @@ def start_task_process(source="api"):
         exclude_tags=control.get("exclude_tags", []),
         last_error=None,
     )
-    append_log(f"{source}启动淘金币任务")
-    append_key_log(f"{source}启动淘金币任务")
+    task_name = "做体力任务" if mode == "energy" else "淘金币任务"
+    append_log(f"{source}启动{task_name}")
+    append_key_log(f"{source}启动{task_name}")
     RUN_LOG_PATH.parent.mkdir(exist_ok=True)
     log_file = RUN_LOG_PATH.open("a", encoding="utf-8", buffering=1)
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    env["TJB_TASK_MODE"] = mode
     process = subprocess.Popen(
         [sys.executable, "-u", str(SCRIPT_PATH)],
         cwd=str(BASE_DIR),
@@ -144,6 +146,11 @@ def auto_start_task():
 @app.post("/api/start")
 def start_task():
     return start_task_process("手动")
+
+
+@app.post("/api/start-energy")
+def start_energy_task():
+    return start_task_process("手动", mode="energy")
 
 
 @app.post("/api/stop")

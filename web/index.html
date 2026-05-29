@@ -70,6 +70,11 @@
       color: #fff;
       border-color: #374151;
     }
+    button.energy {
+      background: #7c3aed;
+      color: #fff;
+      border-color: #7c3aed;
+    }
     button.active {
       background: #e0f2fe;
       border-color: #0284c7;
@@ -148,6 +153,7 @@
       <button id="stop_btn" class="danger" onclick="post('/api/stop')">停止</button>
       <button id="pause_btn" class="warning" onclick="post('/api/pause')">暂停</button>
       <button id="resume_btn" class="info" onclick="post('/api/resume')">继续</button>
+      <button id="energy_btn" class="energy" onclick="post('/api/start-energy')">做体力</button>
       <button id="restart_service_btn" class="service" onclick="restartService()">重启服务</button>
     </section>
 
@@ -201,6 +207,7 @@
       external_app: '任务页 - 三方应用',
       coin_home: '淘金币首页',
       daily_task_list: '淘金币任务列表页',
+      energy_task_list: '做任务赚体力列表页',
       taobao_browse_task: '任务页 - 滑动浏览',
       quiz: '任务页 - 答题',
       task_done: '任务完成页'
@@ -401,6 +408,7 @@
       document.getElementById('stop_btn').disabled = !status.running;
       document.getElementById('pause_btn').disabled = !status.running || status.paused;
       document.getElementById('resume_btn').disabled = !status.running || !status.paused;
+      document.getElementById('energy_btn').disabled = status.running;
       document.getElementById('restart_service_btn').disabled = false;
       document.getElementById('version').textContent = text(status.version);
       document.getElementById('activity').textContent = text(status.activity);

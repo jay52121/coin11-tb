@@ -1,3 +1,4 @@
+import os
 import random
 import re
 import threading
@@ -13,7 +14,8 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260530-0143"
+VERSION = "coin-row-xml-log-20260530-0158"
+RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -423,6 +425,10 @@ def looks_like_good_shop_page(texts):
     return any(re.search(r"今日推荐\d+家好店", text) for text in texts)
 
 
+def looks_like_energy_task_list(texts):
+    return has_any(texts, ["做任务赚体力"]) and has_any(texts, ["赚体力", "体力"])
+
+
 def looks_like_good_shop_child_page(texts):
     return has_any(texts, ["淘金币-逛店铺任务SSR", "滑动浏览"]) or (has_any(texts, ["已领取"]) and has_any(texts, ["进店"]))
 
@@ -524,6 +530,10 @@ def looks_like_shop_browse_task(task_name, texts):
 def classify_current_page():
     package_name, activity_name = get_current_app(d)
     texts = get_page_texts(120)
+    if looks_like_energy_task_list(texts):
+        page_type = "energy_task_list"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
     if looks_like_good_shop_page(texts):
         page_type = "good_shop_page"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
@@ -1282,8 +1292,8 @@ def handle_after_task_click(task_name, click_key=None):
     if task_is_good_shop_task(task_name) and looks_like_good_shop_page(texts):
         handle_good_shop_task()
         return
-    if page_type == "daily_task_list":
-        print("点击后仍在日常任务列表，记录无效点击并继续")
+    if page_type in ["daily_task_list", "energy_task_list"]:
+        print("点击后仍在任务列表，记录无效点击并继续")
         append_key_log(f"任务未进入: {task_name}")
         if click_key:
             invalid_click_keys.add(click_key)
@@ -1332,7 +1342,7 @@ def back_to_task():
             return
         page_type, package_name, activity_name, texts = classify_current_page()
         print("返回中页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
-        if page_type == "daily_task_list":
+        if page_type in ["daily_task_list", "energy_task_list"]:
             print("当前是任务列表画面，停止返回")
             return
         if page_type == "task_done":
@@ -1425,8 +1435,72 @@ def ensure_task_list_at_start():
     return False
 
 
+def ensure_energy_task_list_at_start():
+    set_action("finding_entry")
+    page_type, package_name, activity_name, texts = classify_current_page()
+    print("做体力启动前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:12]})
+    if page_type == "energy_task_list":
+        return True
+    message = "做体力模式只处理当前已打开的做任务赚体力页面，不自动寻找入口"
+    print(message)
+    append_key_log(message)
+    update_status(last_error=message, action="idle")
+    return False
+
+
+def energy_task_loop():
+    global finish_count
+    no_task_scroll_count = 0
+    if not ensure_energy_task_list_at_start():
+        return
+    print("进入做体力任务执行循环")
+    while True:
+        try:
+            if should_stop():
+                print("收到停止请求，退出做体力循环")
+                break
+            wait_if_paused()
+            time.sleep(1)
+            page_type, package_name, activity_name, texts = classify_current_page()
+            print("做体力操作前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:10]})
+            if page_type == "energy_task_list":
+                check_verify(d)
+                set_action("finding_task")
+                action_view, task_name = find_task_action_button()
+                if action_view:
+                    print("做体力点击按钮", task_name)
+                    set_action("clicking_task", current_task=task_name)
+                    clicked_key = task_click_key(task_name)
+                    have_clicked[clicked_key] = have_clicked.get(clicked_key, 0) + 1
+                    print("记录任务点击次数", clicked_key, have_clicked[clicked_key])
+                    bounds = action_view.bounds()
+                    action_view.click()
+                    handle_after_task_click(task_name, f"energy:{bounds}")
+                    no_task_scroll_count = 0
+                    continue
+                no_task_scroll_count += 1
+                print("做体力未找到可点击按钮，继续下翻", no_task_scroll_count)
+                if no_task_scroll_count <= 8:
+                    scroll_task_list_once()
+                    continue
+                print("做体力连续下翻仍未找到可点击按钮，结束本轮")
+                break
+            if page_type in ["quiz", "shop_subscribe_task", "task_done", "taobao_browse_task", "external_app", "coin_home", "unknown_taobao_page"]:
+                handle_after_task_click("做体力任务页外处理")
+                continue
+            print("做体力模式离开任务列表，结束本轮", page_type)
+            break
+        except Exception as exc:
+            print("做体力循环异常", exc)
+            update_status(last_error=str(exc), action="error")
+            back_to_task()
+
+
 def main_loop():
     global finish_count
+    if RUN_MODE == "energy":
+        energy_task_loop()
+        return
     no_task_scroll_count = 0
     coin_home_fail_count = 0
     update_status(running=True, paused=False, action="starting", exclude_tags=get_exclude_tags(), last_error=None)
