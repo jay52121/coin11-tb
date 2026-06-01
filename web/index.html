@@ -477,6 +477,14 @@
       return editor && editor.contains(document.activeElement);
     }
 
+    function tagEditorIsDirty(editor) {
+      return editor && editor.dataset.dirty === '1';
+    }
+
+    function markTagEditorDirty(editor) {
+      if (editor) editor.dataset.dirty = '1';
+    }
+
     function getTagEditorValues(editorOrId) {
       const editor = typeof editorOrId === 'string' ? document.getElementById(editorOrId) : editorOrId;
       if (!editor) return [];
@@ -488,6 +496,7 @@
       if (!clean) return;
       const current = new Set(getTagEditorValues(editor));
       if (current.has(clean)) return;
+      markTagEditorDirty(editor);
       renderTagEditor(editor, [...current, clean]);
     }
 
@@ -507,6 +516,7 @@
         remove.textContent = 'X';
         remove.title = `删除 ${value}`;
         remove.addEventListener('click', () => {
+          markTagEditorDirty(editor);
           renderTagEditor(editor, getTagEditorValues(editor).filter(item => item !== value), { keepInput: true });
         });
         tag.append(remove);
@@ -538,7 +548,7 @@
 
     function renderExcludeEditor(kind, values) {
       const editor = document.getElementById(kind === 'energy' ? 'energy_exclude_editor' : 'coin_exclude_editor');
-      if (!tagEditorIsActive(editor)) {
+      if (!tagEditorIsActive(editor) && !tagEditorIsDirty(editor)) {
         renderTagEditor(editor, values);
       }
     }
@@ -548,11 +558,14 @@
       const field = isEnergy ? 'energy_exclude_tags' : 'coin_exclude_tags';
       const editorId = isEnergy ? 'energy_exclude_editor' : 'coin_exclude_editor';
       const value = getTagEditorValues(editorId);
-      await fetch('/api/exclude-tags', {
+      const response = await fetch('/api/exclude-tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: value })
-      });
+      }).then(r => r.json());
+      const editor = document.getElementById(editorId);
+      editor.dataset.dirty = '0';
+      renderTagEditor(editor, response[field] || value);
       await refresh();
     }
 
