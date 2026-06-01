@@ -306,7 +306,24 @@
       document.getElementById('restart_service_btn').disabled = true;
       await fetch('/api/service/restart', { method: 'POST' });
       document.getElementById('running').textContent = '服务重启中';
-      setTimeout(refresh, 2500);
+      waitForServiceAndReload();
+    }
+
+    async function waitForServiceAndReload() {
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        try {
+          const response = await fetch(`/api/status?t=${Date.now()}`, { cache: 'no-store' });
+          if (response.ok) {
+            window.location.reload();
+            return;
+          }
+        } catch (err) {
+          // Service is expected to be briefly unavailable during restart.
+        }
+      }
+      document.getElementById('running').textContent = '服务重启中，请手动刷新';
     }
 
     async function autoStartOnLoad() {

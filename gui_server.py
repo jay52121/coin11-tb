@@ -138,6 +138,7 @@ def restart_service_worker():
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    env["TJB_DISABLE_AUTO_START"] = "1"
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "gui_server:app", "--host", "127.0.0.1", "--port", "8765"],
@@ -153,6 +154,10 @@ def restart_service_worker():
 
 @app.on_event("startup")
 def auto_start_task():
+    if os.environ.get("TJB_DISABLE_AUTO_START") == "1":
+        append_log("服务启动：跳过自动启动任务")
+        update_status(running=False, paused=False, action="idle")
+        return
     start_task_process("服务启动后自动")
 
 
