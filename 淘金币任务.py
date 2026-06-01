@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0031"
+VERSION = "coin-row-xml-log-20260602-0044"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -646,6 +646,11 @@ def looks_like_shop_browse_task(task_name, texts):
 def classify_current_page():
     package_name, activity_name = get_current_app(d)
     texts = get_page_texts(120)
+    allow_text_fallback = package_name in (TB_APP, None, "")
+    if not allow_text_fallback:
+        page_type = "external_app"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
     if looks_like_energy_task_list(texts):
         page_type = "energy_task_list"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
