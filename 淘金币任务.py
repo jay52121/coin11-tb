@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-1458"
+VERSION = "coin-row-xml-log-20260601-1507"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -1324,11 +1324,38 @@ def click_good_shop_entry_once(texts):
     return True, key
 
 
+def wait_before_exit_good_shop_task(timeout=30):
+    notify_phone(d, "逛好店即将退出，请检查是否还有可做入口")
+    print("逛好店准备退出，等待人工检查并继续扫描", timeout, "秒")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if should_stop():
+            return False
+        wait_if_paused()
+        texts = get_page_texts(120)
+        print("逛好店退出前扫描", int(deadline - time.time()), texts[:16])
+        if not looks_like_good_shop_page(texts):
+            print("退出前扫描发现已不在逛好店页面")
+            return False
+        clicked, entry_key = click_good_shop_entry_once(texts)
+        if clicked:
+            after_texts = get_page_texts(120)
+            print("退出前扫描点击入口后页面文本", entry_key, after_texts[:20])
+            if looks_like_good_shop_child_page(after_texts):
+                handle_good_shop_child_task()
+                return True
+            print("退出前扫描入口点击无效", entry_key)
+            good_shop_failed_entry_keys.add(entry_key)
+        time.sleep(1)
+    return False
+
+
 def handle_good_shop_task():
     set_action("doing_scroll_task", current_task="逛好店赚一大波金币")
     print("处理逛好店赚一大波金币：最多翻5页查找逛店铺/最多还可领")
     swipe_count = 0
     loop_count = 0
+    exit_wait_used = False
     while swipe_count < 5 and loop_count < 20:
         loop_count += 1
         if should_stop():
@@ -1350,6 +1377,11 @@ def handle_good_shop_task():
         print("本页未找到逛好店入口，执行下翻", swipe_count)
         human_swipe(screen_width // 2, int(screen_height * 0.78), screen_width // 2, int(screen_height * 0.35), 0.35)
         time.sleep(1.2)
+    if not exit_wait_used:
+        exit_wait_used = True
+        if wait_before_exit_good_shop_task():
+            handle_good_shop_task()
+            return
     print("逛好店页面实际下翻5次仍未找到入口，返回任务列表")
     back_to_task()
 
