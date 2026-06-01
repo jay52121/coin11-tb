@@ -14,7 +14,7 @@ def get_reader(gpu=True):
     return _reader
 
 
-def resize_for_ocr(image, max_width=900):
+def resize_for_ocr(image, max_width=640):
     height, width = image.shape[:2]
     if width <= max_width:
         return image, 1.0
@@ -27,7 +27,7 @@ def normalize_text(text):
     return text.replace(" ", "").replace("己", "已")
 
 
-def image_has_text(image, target_text, max_width=900, gpu=True, min_confidence=0.2):
+def image_has_text(image, target_text, max_width=640, gpu=True, min_confidence=0.2):
     timings = {}
     started = time.perf_counter()
 
@@ -49,7 +49,7 @@ def image_has_text(image, target_text, max_width=900, gpu=True, min_confidence=0
     return bool(hits), hits, timings
 
 
-def read_ocr_results(image, max_width=900, gpu=True, min_confidence=0.2):
+def read_ocr_results(image, max_width=640, gpu=True, min_confidence=0.2):
     timings = {}
     started = time.perf_counter()
 
@@ -78,7 +78,7 @@ def read_ocr_results(image, max_width=900, gpu=True, min_confidence=0.2):
     return items, timings
 
 
-def screen_has_text(d, target_text, max_width=900, gpu=True, min_confidence=0.2):
+def screen_has_text(d, target_text, max_width=640, gpu=True, min_confidence=0.2):
     started = time.perf_counter()
     screenshot = d.screenshot(format="opencv")
     screenshot_time = time.perf_counter() - started

@@ -14,7 +14,8 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0018"
+VERSION = "coin-row-xml-log-20260602-0026"
+OCR_MAX_WIDTH = 640
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
@@ -356,7 +357,7 @@ def ocr_task_done(screenshot, screenshot_time=0, ignore_targets=None):
         all_hits = []
         last_timings = {}
         for target in targets:
-            ok, hits, timings = image_has_text(screenshot, target, max_width=900, gpu=True, min_confidence=0.2)
+            ok, hits, timings = image_has_text(screenshot, target, max_width=OCR_MAX_WIDTH, gpu=True, min_confidence=0.2)
             timings["screenshot"] = screenshot_time
             timings["total"] += screenshot_time
             last_timings = timings
@@ -1418,7 +1419,7 @@ def find_ocr_task_action_buttons():
     started = time.perf_counter()
     screenshot = d.screenshot(format="opencv")
     screenshot_time = time.perf_counter() - started
-    items, timings = read_ocr_results(screenshot, max_width=900, gpu=True, min_confidence=0.25)
+    items, timings = read_ocr_results(screenshot, max_width=OCR_MAX_WIDTH, gpu=True, min_confidence=0.25)
     timings["screenshot"] = screenshot_time
     timings["total"] += screenshot_time
     print("OCR任务按钮扫描", len(items), {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
@@ -1441,7 +1442,7 @@ def find_ocr_task_action_buttons():
 
 def ocr_task_list_is_at_bottom():
     screenshot = d.screenshot(format="opencv")
-    items, timings = read_ocr_results(screenshot, max_width=900, gpu=True, min_confidence=0.25)
+    items, timings = read_ocr_results(screenshot, max_width=OCR_MAX_WIDTH, gpu=True, min_confidence=0.25)
     bottom_words = ["收起更多任务", "注：以上金币额", "以上奖励均为最高奖励", "实际获得奖励为准"]
     hits = [item for item in items if ocr_text_contains(item["text"], bottom_words)]
     print("OCR底部判断", bool(hits), [(item["text"], item["bounds"]) for item in hits[:3]], {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
@@ -1450,7 +1451,7 @@ def ocr_task_list_is_at_bottom():
 
 def scan_ocr_once(label):
     screenshot = d.screenshot(format="opencv")
-    items, timings = read_ocr_results(screenshot, max_width=900, gpu=True, min_confidence=0.25)
+    items, timings = read_ocr_results(screenshot, max_width=OCR_MAX_WIDTH, gpu=True, min_confidence=0.25)
     print("OCR扫描", label, len(items), {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
     return items
 
