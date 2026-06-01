@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2236"
+VERSION = "coin-row-xml-log-20260601-2240"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -821,6 +821,26 @@ def find_jump_energy_button():
     return bounds, text, energy
 
 
+def looks_like_blocking_overlay(root, base_bounds):
+    if root is None or not base_bounds:
+        return False
+    base_top = base_bounds[1]
+    overlay_words = ["关闭", "去赚体力", "立即领取", "领取", "确认", "知道了", "我知道了"]
+    for node in root.iter("node"):
+        text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not text or not bounds:
+            continue
+        if bounds[1] < base_top + 120:
+            continue
+        if bounds[2] - bounds[0] < 80 or bounds[3] - bounds[1] < 40:
+            continue
+        if node.attrib.get("clickable") == "true" and any(word in text for word in overlay_words):
+            print("疑似遮挡弹窗控件", text, bounds)
+            return True
+    return False
+
+
 def run_jump_energy_if_visible():
     miss_count = 0
     did_run = False
@@ -848,6 +868,12 @@ def run_jump_energy_if_visible():
         human_long_press_bounds(bounds, hold=3.0, radius=10)
         did_run = True
         time.sleep(5)
+        root = dump_root()
+        if looks_like_blocking_overlay(root, bounds):
+            print("长按跳一跳后疑似被遮挡，按Back关闭遮挡")
+            human_back()
+            time.sleep(1.5)
+            continue
         if energy is None:
             print("跳一跳未解析到剩余体力，只执行一次")
             return did_run
