@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0001"
+VERSION = "coin-row-xml-log-20260602-0006"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
@@ -1444,10 +1444,45 @@ def click_text_by_xml_or_ocr(words, label, timeout=0.6, ocr_items=None):
     return click_from_ocr_items(items, words, label)
 
 
+def click_good_shop_claim_once(claim_clicks, ocr_items=None):
+    target = d(classNameMatches=ACTION_CLASS, textMatches="立即领")
+    if target.exists(timeout=0.6):
+        bounds = safe_obj_bounds(target, "立即领")
+        if not bounds:
+            return False
+        key = tuple(bounds)
+        if claim_clicks.get(key, 0) >= 2:
+            print("跳过重复立即领，已点击2次", bounds)
+            return False
+        print("XML点击", "立即领", safe_obj_text(target, "立即领"), bounds)
+        human_click_bounds(bounds)
+        claim_clicks[key] = claim_clicks.get(key, 0) + 1
+        print("记录立即领点击次数", bounds, claim_clicks[key])
+        time.sleep(1.5)
+        return True
+    items = ocr_items if ocr_items is not None else scan_ocr_once("立即领")
+    hits = [item for item in items if ocr_text_contains(item["text"], ["立即领"])]
+    print("OCR查找", "立即领", [(item["text"], item["bounds"]) for item in hits[:5]])
+    for item in sorted(hits, key=lambda item: (item["bounds"][1], item["bounds"][0])):
+        bounds = item["bounds"]
+        key = tuple(bounds)
+        if claim_clicks.get(key, 0) >= 2:
+            print("跳过重复立即领，已点击2次", bounds)
+            continue
+        print("OCR点击", "立即领", bounds)
+        human_click_bounds(bounds)
+        claim_clicks[key] = claim_clicks.get(key, 0) + 1
+        print("记录立即领点击次数", bounds, claim_clicks[key])
+        time.sleep(1.5)
+        return True
+    return False
+
+
 def handle_good_shop_child_task():
     print("进入逛好店子任务，循环处理订阅/立即领")
     idle_count = 0
     loop_count = 0
+    claim_clicks = {}
     while idle_count < 2 and loop_count < 12:
         loop_count += 1
         if should_stop():
@@ -1462,7 +1497,7 @@ def handle_good_shop_child_task():
             idle_count = 0
             time.sleep(1)
             continue
-        if click_text_by_xml_or_ocr(["立即领"], "立即领", ocr_items=ocr_items):
+        if click_good_shop_claim_once(claim_clicks, ocr_items=ocr_items):
             idle_count = 0
             human_back()
             time.sleep(1.5)
