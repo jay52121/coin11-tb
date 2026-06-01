@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-1634"
+VERSION = "coin-row-xml-log-20260601-1639"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -141,11 +141,15 @@ def action_text_pattern():
 
 
 def wait_if_paused():
+    was_paused = False
     while read_control().get("pause", False):
+        was_paused = True
         update_status(running=True, paused=True, action="paused")
         time.sleep(1)
         if should_stop():
             break
+    if was_paused and not should_stop():
+        log_page_position("暂停恢复后页面定位")
 
 
 def parse_bounds(bounds_text):
@@ -629,6 +633,40 @@ def classify_current_page():
     page_type = "unknown_taobao_page"
     set_page(page_type, activity=activity_name or "", running=True, paused=False)
     return page_type, package_name, activity_name, texts
+
+
+def page_signature(page_type, package_name, activity_name, texts):
+    stable_texts = []
+    ignore_patterns = [
+        r"^\d{1,2}:\d{2}$",
+        r"^\d+(\.\d+)?$",
+        r"^KB/S$",
+        r"^MB/S$",
+        r"^O1CN",
+        r"^com\.android\.systemui",
+    ]
+    for text in texts or []:
+        item = str(text).strip()
+        if not item:
+            continue
+        if any(re.search(pattern, item) for pattern in ignore_patterns):
+            continue
+        stable_texts.append(item[:40])
+        if len(stable_texts) >= 5:
+            break
+    return (page_type, package_name or "", activity_name or "", tuple(stable_texts))
+
+
+def log_page_position(reason):
+    page_type, package_name, activity_name, texts = classify_current_page()
+    info = {
+        "page": page_type,
+        "package": package_name,
+        "activity": activity_name,
+        "texts": texts[:8],
+    }
+    print(reason, info)
+    return page_type, package_name, activity_name, texts, page_signature(page_type, package_name, activity_name, texts)
 
 
 def open_coin_home_direct(stop=True):
@@ -1465,6 +1503,37 @@ def handle_after_task_click(task_name, click_key=None):
     back_to_task()
 
 
+def is_task_page_for_fast_back(page_type):
+    return page_type in [
+        "taobao_browse_task",
+        "external_app",
+        "unknown_taobao_page",
+        "shop_subscribe_task",
+        "task_done",
+        "quiz",
+    ]
+
+
+def back_once_and_probe(label, before_signature):
+    human_back()
+    time.sleep(0.5)
+    after_page, after_package, after_activity, after_texts, after_signature = log_page_position(f"{label}后页面定位")
+    same_page = after_signature == before_signature and is_task_page_for_fast_back(after_page)
+    return after_page, after_package, after_activity, after_texts, after_signature, same_page
+
+
+def fast_double_back_if_needed(same_task_back_count, reason):
+    if same_task_back_count < 2:
+        return same_task_back_count
+    print(reason)
+    human_back()
+    time.sleep(0.5)
+    human_back()
+    time.sleep(0.8)
+    log_page_position("快速连续返回后页面定位")
+    return 0
+
+
 def back_to_task():
     set_action("returning_to_task_list")
     print("开始返回任务页面")
@@ -1472,6 +1541,7 @@ def back_to_task():
     cross_app_count = 0
     cross_app_switch_count = 0
     browse_back_count = 0
+    same_task_back_count = 0
     loop_count = 0
     while True:
         if should_stop():
@@ -1485,15 +1555,15 @@ def back_to_task():
             print("返回任务页循环过多，使用小插件入口恢复")
             open_coin_home_direct()
             return
-        page_type, package_name, activity_name, texts = classify_current_page()
-        print("返回中页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
+        page_type, package_name, activity_name, texts, current_signature = log_page_position("返回中页面判定")
         if page_type in ["daily_task_list", "energy_task_list"]:
             print("当前是任务列表画面，停止返回")
             return
         if page_type == "task_done":
             browse_back_count = 0
-            human_back()
-            time.sleep(1.5)
+            _, _, _, _, _, same_page = back_once_and_probe("任务完成页返回", current_signature)
+            same_task_back_count = same_task_back_count + 1 if same_page else 0
+            same_task_back_count = fast_double_back_if_needed(same_task_back_count, "连续两次返回仍在同一任务完成页，快速连续返回两次")
             continue
         if page_type == "taobao_browse_task":
             browse_back_count += 1
@@ -1502,22 +1572,23 @@ def back_to_task():
                 open_coin_home_direct()
                 return
             print("返回任务页时仍在浏览任务页，先后退回任务列表", browse_back_count)
-            human_back()
-            time.sleep(1.5)
+            _, _, _, _, _, same_page = back_once_and_probe("浏览任务页返回", current_signature)
+            same_task_back_count = same_task_back_count + 1 if same_page else 0
+            same_task_back_count = fast_double_back_if_needed(same_task_back_count, "连续两次返回仍在同一浏览任务页，快速连续返回两次")
             continue
         browse_back_count = 0
         if page_type == "shop_subscribe_task":
             print("返回任务页时仍在店铺订阅任务页，先后退回任务列表")
-            human_back()
-            time.sleep(1.5)
+            _, _, _, _, _, same_page = back_once_and_probe("店铺订阅页返回", current_signature)
+            same_task_back_count = same_task_back_count + 1 if same_page else 0
+            same_task_back_count = fast_double_back_if_needed(same_task_back_count, "连续两次返回仍在同一店铺订阅任务页，快速连续返回两次")
             continue
         if page_type == "coin_home":
             if RUN_MODE == "energy":
                 if enter_energy_task_list_from_coin_home():
                     return
                 print("体力模式未能从首页回到赚体力列表，继续后退")
-                human_back()
-                time.sleep(1.5)
+                back_once_and_probe("体力首页返回", current_signature)
                 continue
             if enter_task_list_from_coin_home():
                 return
@@ -1530,8 +1601,9 @@ def back_to_task():
                 continue
             if cross_app_count <= CROSS_APP_BACK_LIMIT:
                 print("当前不在淘宝，先尝试返回上一层", cross_app_count)
-                human_back()
-                time.sleep(2)
+                _, _, _, _, _, same_page = back_once_and_probe("外部App返回", current_signature)
+                same_task_back_count = same_task_back_count + 1 if same_page else 0
+                same_task_back_count = fast_double_back_if_needed(same_task_back_count, "连续两次返回仍在同一外部任务页，快速连续返回两次")
                 continue
             cross_app_switch_count += 1
             if cross_app_switch_count <= 2:
@@ -1554,15 +1626,15 @@ def back_to_task():
             open_coin_home_direct(stop=True)
             return
         print("点击后退", back_count)
-        human_back()
-        time.sleep(2)
+        _, _, _, _, _, same_page = back_once_and_probe("普通后退", current_signature)
+        same_task_back_count = same_task_back_count + 1 if same_page else 0
+        same_task_back_count = fast_double_back_if_needed(same_task_back_count, "连续两次普通后退仍在同一任务页，快速连续返回两次")
 
 
 def ensure_task_list_at_start():
     set_action("finding_entry")
     for attempt in range(2):
-        page_type, package_name, activity_name, texts = classify_current_page()
-        print("启动前页面判定", {"attempt": attempt + 1, "page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:10]})
+        page_type, package_name, activity_name, texts, _ = log_page_position(f"启动前页面定位 attempt={attempt + 1}")
         if page_type == "daily_task_list":
             return True
         if page_type == "good_shop_page":
@@ -1586,14 +1658,14 @@ def ensure_task_list_at_start():
         if attempt == 0:
             print("启动入口仍未找到，先返回一次再重试")
             human_back()
-            time.sleep(2)
+            time.sleep(0.5)
+            log_page_position("启动重试返回后页面定位")
     return False
 
 
 def ensure_energy_task_list_at_start():
     set_action("finding_entry")
-    page_type, package_name, activity_name, texts = classify_current_page()
-    print("做体力启动前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:12]})
+    page_type, package_name, activity_name, texts, _ = log_page_position("做体力启动前页面定位")
     if page_type == "energy_task_list":
         return True
     message = "做体力模式只处理当前已打开的做任务赚体力页面，不自动寻找入口"
