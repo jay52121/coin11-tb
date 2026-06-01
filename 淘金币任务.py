@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0250"
+VERSION = "coin-row-xml-log-20260602-0306"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -301,7 +301,8 @@ def skip_task_name(task_name):
     skip_words = get_exclude_tags() or ["下单", "快手", "评价", "助力"]
     extra_words = rule_list("skip_task_extra_words", [])
     update_status(exclude_tags=skip_words)
-    compact_task = normalize_text(task_name).replace(" ", "").lower()
+    skip_source = re.sub(r"第\d+笔[\d.]+%?\s*分享助力\s*hd_bonus_progress_bar_text_target", "", task_name or "")
+    compact_task = normalize_text(skip_source).replace(" ", "").lower()
     if "uc" in [word.lower() for word in skip_words + extra_words] and re.search(r"去逛0[6g]送红包福利", compact_task):
         print("任务命中跳过词", "UC", task_name)
         return True
