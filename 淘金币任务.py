@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-1616"
+VERSION = "coin-row-xml-log-20260601-1631"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -104,7 +104,13 @@ def should_stop():
 
 
 def get_exclude_tags():
-    tags = read_control().get("exclude_tags", [])
+    control = read_control()
+    if RUN_MODE == "energy":
+        tags = control.get("energy_exclude_tags", [])
+    else:
+        tags = control.get("coin_exclude_tags", [])
+    if not tags:
+        tags = control.get("exclude_tags", [])
     if isinstance(tags, list):
         return [str(tag).strip() for tag in tags if str(tag).strip()]
     return []
@@ -273,7 +279,7 @@ def task_click_key(task_name):
 def skip_task_name(task_name):
     if not task_name:
         return False
-    skip_words = rule_list("skip_task_words", get_exclude_tags() or ["下单", "快手", "评价", "助力"])
+    skip_words = get_exclude_tags() or ["下单", "快手", "评价", "助力"]
     extra_words = rule_list("skip_task_extra_words", [])
     update_status(exclude_tags=skip_words)
     compact_task = normalize_text(task_name).replace(" ", "").lower()

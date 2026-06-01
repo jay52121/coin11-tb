@@ -17,6 +17,8 @@ DEFAULT_CONTROL = {
     "stop": False,
     "pause": False,
     "exclude_tags": ["下单", "快手", "评价", "助力"],
+    "coin_exclude_tags": ["下单", "快手", "评价", "助力"],
+    "energy_exclude_tags": ["下单", "快手", "评价", "助力", "分享", "每拉"],
 }
 
 DEFAULT_STATUS = {
@@ -28,13 +30,14 @@ DEFAULT_STATUS = {
     "current_task": "",
     "version": "",
     "exclude_tags": [],
+    "coin_exclude_tags": [],
+    "energy_exclude_tags": [],
     "last_error": None,
     "updated_at": "",
 }
 
 DEFAULT_RULES = {
     "action_text_pattern": "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐",
-    "skip_task_words": ["下单", "快手", "评价", "助力"],
     "skip_task_extra_words": [
         "拉好友", "抢红包", "搜索兴趣商品下单", "买精选商品", "全场3元3件", "固定入口",
         "农场小游戏", "砸蛋", "大众点评", "蚂蚁新村", "消消乐", "3元抢3件包邮到家",
@@ -150,7 +153,10 @@ def update_status(**kwargs):
 
 
 def reset_state():
-    atomic_write_json(CONTROL_PATH, DEFAULT_CONTROL.copy())
+    control = read_control()
+    control["stop"] = False
+    control["pause"] = False
+    atomic_write_json(CONTROL_PATH, control)
     if not RULES_PATH.exists():
         atomic_write_json(RULES_PATH, DEFAULT_RULES.copy())
     status = DEFAULT_STATUS.copy()

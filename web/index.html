@@ -75,6 +75,18 @@
       color: #fff;
       border-color: #7c3aed;
     }
+    button.coin-outline {
+      background: #fff;
+      color: #92400e;
+      border-color: #d97706;
+      border-width: 2px;
+    }
+    button.energy-outline {
+      background: #fff;
+      color: #6d28d9;
+      border-color: #7c3aed;
+      border-width: 2px;
+    }
     button.active {
       background: #e0f2fe;
       border-color: #0284c7;
@@ -87,6 +99,29 @@
       border: 1px solid #b8c2cc;
       border-radius: 4px;
       font-size: 14px;
+    }
+    input.coin-input {
+      border-color: #d97706;
+      border-width: 2px;
+    }
+    input.energy-input {
+      border-color: #7c3aed;
+      border-width: 2px;
+    }
+    .exclude-grid {
+      display: grid;
+      grid-template-columns: 110px minmax(260px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      max-width: 920px;
+    }
+    .coin-label {
+      color: #92400e;
+      font-weight: 600;
+    }
+    .energy-label {
+      color: #6d28d9;
+      font-weight: 600;
     }
     textarea {
       width: 100%;
@@ -182,8 +217,14 @@
 
     <section>
       <h2>排除任务标签</h2>
-      <input id="exclude_input" type="text" value="下单,快手,评价,助力">
-      <button onclick="saveExcludeTags()">保存</button>
+      <div class="exclude-grid">
+        <div class="coin-label">金币任务</div>
+        <input id="coin_exclude_input" class="coin-input" type="text" value="下单,快手,评价,助力">
+        <button class="coin-outline" onclick="saveExcludeTags('coin')">保存金币</button>
+        <div class="energy-label">体力任务</div>
+        <input id="energy_exclude_input" class="energy-input" type="text" value="下单,快手,评价,助力,分享,每拉">
+        <button class="energy-outline" onclick="saveExcludeTags('energy')">保存体力</button>
+      </div>
     </section>
 
     <section>
@@ -232,7 +273,6 @@
 
     const ruleMeta = {
       action_text_pattern: ['动作按钮正则', 'pattern', '用于匹配“去完成/去逛逛”等按钮文本；正则命中后作为可点击任务按钮。'],
-      skip_task_words: ['排除任务标签', 'list', '任务名包含任一词就跳过；一行一个词，保存后也同步到状态区。'],
       skip_task_extra_words: ['排除任务扩展词', 'list', '更长的跳过词库；任务名包含任一词就跳过。'],
       done_words: ['已完成任务词', 'list', '用于判断任务行/任务名是否已经完成；命中后不再点击该任务。'],
       search_browse_words: ['搜索浏览页词', 'list', '页面文本包含任一词时，认为是搜索浏览奖励页。'],
@@ -273,12 +313,15 @@
       await post('/api/start');
     }
 
-    async function saveExcludeTags() {
-      const value = document.getElementById('exclude_input').value;
+    async function saveExcludeTags(kind) {
+      const isEnergy = kind === 'energy';
+      const field = isEnergy ? 'energy_exclude_tags' : 'coin_exclude_tags';
+      const inputId = isEnergy ? 'energy_exclude_input' : 'coin_exclude_input';
+      const value = document.getElementById(inputId).value;
       await fetch('/api/exclude-tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exclude_tags: value })
+        body: JSON.stringify({ [field]: value })
       });
       await refresh();
     }
@@ -416,9 +459,17 @@
       document.getElementById('action').textContent = label(actionLabels, status.action);
       document.getElementById('current_task').textContent = text(status.current_task);
       const excludeTags = Array.isArray(status.exclude_tags) ? status.exclude_tags : [];
-      document.getElementById('exclude_tags').textContent = excludeTags.length ? excludeTags.join(', ') : '-';
-      if (document.activeElement !== document.getElementById('exclude_input')) {
-        document.getElementById('exclude_input').value = excludeTags.join(',');
+      const coinExcludeTags = Array.isArray(status.coin_exclude_tags) ? status.coin_exclude_tags : excludeTags;
+      const energyExcludeTags = Array.isArray(status.energy_exclude_tags) ? status.energy_exclude_tags : [];
+      document.getElementById('exclude_tags').textContent = [
+        `金币: ${coinExcludeTags.length ? coinExcludeTags.join(', ') : '-'}`,
+        `体力: ${energyExcludeTags.length ? energyExcludeTags.join(', ') : '-'}`
+      ].join('；');
+      if (document.activeElement !== document.getElementById('coin_exclude_input')) {
+        document.getElementById('coin_exclude_input').value = coinExcludeTags.join(',');
+      }
+      if (document.activeElement !== document.getElementById('energy_exclude_input')) {
+        document.getElementById('energy_exclude_input').value = energyExcludeTags.join(',');
       }
       document.getElementById('last_error').textContent = text(status.last_error);
       document.getElementById('updated_at').textContent = text(status.updated_at);

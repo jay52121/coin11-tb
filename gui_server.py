@@ -72,12 +72,17 @@ def start_task_process(source="api", mode="taojinbi"):
 
     reset_state()
     control = read_control()
+    active_tags = control.get("energy_exclude_tags", []) if mode == "energy" else control.get("coin_exclude_tags", [])
+    if not active_tags:
+        active_tags = control.get("exclude_tags", [])
     update_status(
         running=True,
         paused=False,
         action="starting",
         version=read_script_version(),
-        exclude_tags=control.get("exclude_tags", []),
+        exclude_tags=active_tags,
+        coin_exclude_tags=control.get("coin_exclude_tags", []),
+        energy_exclude_tags=control.get("energy_exclude_tags", []),
         last_error=None,
     )
     task_name = "做体力任务" if mode == "energy" else "淘金币任务"
@@ -216,7 +221,9 @@ def status():
     control = read_control()
     data["running"] = process_running()
     data["version"] = data.get("version") or read_script_version()
-    data["exclude_tags"] = control.get("exclude_tags", [])
+    data["coin_exclude_tags"] = control.get("coin_exclude_tags", [])
+    data["energy_exclude_tags"] = control.get("energy_exclude_tags", [])
+    data["exclude_tags"] = data.get("exclude_tags") or control.get("coin_exclude_tags", []) or control.get("exclude_tags", [])
     return data
 
 
@@ -245,17 +252,37 @@ def control():
 
 @app.post("/api/exclude-tags")
 def update_exclude_tags(payload: dict):
-    raw_tags = payload.get("exclude_tags", [])
-    if isinstance(raw_tags, str):
-        tags = [item.strip() for item in re.split(r"[,，\s]+", raw_tags) if item.strip()]
-    elif isinstance(raw_tags, list):
-        tags = [str(item).strip() for item in raw_tags if str(item).strip()]
-    else:
-        tags = []
-    write_control(exclude_tags=tags)
-    update_status(exclude_tags=tags)
-    append_log(f"更新排除任务标签: {', '.join(tags) if tags else '无'}")
-    return {"ok": True, "exclude_tags": tags}
+    def parse_tags(value):
+        if isinstance(value, str):
+            return [item.strip() for item in re.split(r"[,，\s]+", value) if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
+    coin_tags = parse_tags(payload.get("coin_exclude_tags", payload.get("exclude_tags", [])))
+    energy_tags = parse_tags(payload.get("energy_exclude_tags", []))
+    updates = {}
+    if "coin_exclude_tags" in payload or "exclude_tags" in payload:
+        updates["coin_exclude_tags"] = coin_tags
+        updates["exclude_tags"] = coin_tags
+    if "energy_exclude_tags" in payload:
+        updates["energy_exclude_tags"] = energy_tags
+    control = write_control(**updates)
+    update_status(
+        exclude_tags=control.get("coin_exclude_tags", []),
+        coin_exclude_tags=control.get("coin_exclude_tags", []),
+        energy_exclude_tags=control.get("energy_exclude_tags", []),
+    )
+    append_log(
+        "更新排除任务标签: "
+        f"金币={', '.join(control.get('coin_exclude_tags', [])) or '无'}; "
+        f"体力={', '.join(control.get('energy_exclude_tags', [])) or '无'}"
+    )
+    return {
+        "ok": True,
+        "coin_exclude_tags": control.get("coin_exclude_tags", []),
+        "energy_exclude_tags": control.get("energy_exclude_tags", []),
+    }
 
 
 @app.get("/api/rules")
@@ -266,8 +293,5 @@ def rules():
 @app.post("/api/rules")
 def update_rules(payload: dict):
     rules = write_rules(payload)
-    if "skip_task_words" in rules:
-        write_control(exclude_tags=rules.get("skip_task_words", []))
-        update_status(exclude_tags=rules.get("skip_task_words", []))
     append_log("更新文字匹配规则")
     return {"ok": True, "rules": rules}

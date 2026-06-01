@@ -1,10 +1,24 @@
 {
-  "stop": true,
+  "stop": false,
   "pause": false,
   "exclude_tags": [
     "下单",
     "快手",
     "评价",
     "助力"
+  ],
+  "coin_exclude_tags": [
+    "下单",
+    "快手",
+    "评价",
+    "助力"
+  ],
+  "energy_exclude_tags": [
+    "下单",
+    "快手",
+    "评价",
+    "助力",
+    "分享",
+    "每拉"
   ]
 }
