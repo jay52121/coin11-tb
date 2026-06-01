@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>启动淘金币控制台</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", sans-serif;
+      background: #f5f6f8;
+      color: #1f2933;
+    }
+    main {
+      max-width: 760px;
+      margin: 80px auto;
+      padding: 24px;
+      background: #fff;
+      border: 1px solid #d8dee6;
+      border-radius: 6px;
+    }
+    h1 {
+      margin: 0 0 20px;
+      font-size: 24px;
+    }
+    button, a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 180px;
+      height: 42px;
+      margin-right: 10px;
+      padding: 0 16px;
+      border: 1px solid #0f766e;
+      border-radius: 4px;
+      background: #0f766e;
+      color: #fff;
+      font-size: 15px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    a.secondary {
+      background: #fff;
+      color: #1f2933;
+      border-color: #b8c2cc;
+    }
+    p {
+      line-height: 1.7;
+      color: #52616f;
+    }
+    code {
+      background: #f1f5f9;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>启动淘金币控制台</h1>
+    <p>第一次使用前，先双击同目录下的 <code>安装一键启动协议.bat</code>。以后可以把这个 HTML 保存为浏览器书签。</p>
+    <p>
+      <button onclick="startService()">一键启动服务</button>
+      <a class="button secondary" href="http://127.0.0.1:8765/?no_auto_start=1" target="_blank">打开控制台</a>
+    </p>
+    <p id="status">点击“一键启动服务”后，会启动本地服务并自动打开控制台。不会自动开始任务。</p>
+  </main>
+
+  <script>
+    function startService() {
+      document.getElementById('status').textContent = '正在请求 Windows 启动本地服务...';
+      window.location.href = 'tjb-gui://start';
+      setTimeout(() => {
+        window.open('http://127.0.0.1:8765/?no_auto_start=1', '_blank');
+      }, 2500);
+    }
+  </script>
+</body>
+</html>
