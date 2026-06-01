@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0011"
+VERSION = "coin-row-xml-log-20260602-0018"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
@@ -1521,8 +1521,9 @@ def handle_good_shop_child_task():
     print("进入逛好店子任务，循环处理订阅/立即领")
     idle_count = 0
     loop_count = 0
+    swipe_count = 0
     claim_clicks = {}
-    while idle_count < 2 and loop_count < 12:
+    while idle_count < 3 and loop_count < 14:
         loop_count += 1
         if should_stop():
             return
@@ -1542,6 +1543,13 @@ def handle_good_shop_child_task():
             time.sleep(1.5)
             continue
         idle_count += 1
+        if idle_count == 2 and swipe_count < 1:
+            print("逛好店子任务未找到订阅/立即领，先下翻一页继续查找")
+            human_swipe(screen_width // 2, int(screen_height * 0.78), screen_width // 2, int(screen_height * 0.35), 0.35)
+            swipe_count += 1
+            idle_count = 0
+            time.sleep(1.2)
+            continue
         time.sleep(0.8)
     print("逛好店子任务未再找到订阅/立即领，返回今日推荐页")
     human_back()
