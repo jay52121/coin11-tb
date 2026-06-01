@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0135"
+VERSION = "coin-row-xml-log-20260602-0143"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -934,6 +934,8 @@ def run_jump_energy_if_visible():
         time.sleep(5)
         root = dump_root()
         if looks_like_blocking_overlay(root, bounds):
+            print("长按跳一跳后疑似被遮挡，等待5秒后再按Back")
+            time.sleep(5)
             print("长按跳一跳后疑似被遮挡，按Back关闭遮挡")
             human_back()
             time.sleep(1.5)
