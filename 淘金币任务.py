@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-1507"
+VERSION = "coin-row-xml-log-20260601-1616"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -419,6 +419,10 @@ def task_list_is_at_bottom(texts):
     return has_any(texts, rule_list("task_list_bottom_words", ["收起更多任务"]))
 
 
+def looks_like_more_coin_expand_section(texts):
+    return has_any(texts, ["更多金币等你赚"]) and has_any(texts, ["展开"])
+
+
 def looks_like_shop_subscribe_task(texts):
     if has_any(texts, ["淘金币首页", "淘金币标题", "购物车", "可抵"]):
         return False
@@ -584,12 +588,12 @@ def classify_current_page():
         page_type = "good_shop_page"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
-    if package_name != TB_APP:
-        page_type = "external_app"
+    if looks_like_more_coin_expand_section(texts):
+        page_type = "daily_task_list"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
-    if has_task_done_text(texts):
-        page_type = "task_done"
+    if package_name != TB_APP:
+        page_type = "external_app"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
     if has_any(texts, rule_list("quiz_words", ["淘金币趣味答题", "我选好了"])):
@@ -598,6 +602,10 @@ def classify_current_page():
         return page_type, package_name, activity_name, texts
     if looks_like_task_list_page(texts):
         page_type = "daily_task_list"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
+    if has_task_done_text(texts):
+        page_type = "task_done"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
     if looks_like_coin_home_page(texts):
@@ -768,6 +776,26 @@ def expand_more_coin_tasks():
         bounds = safe_obj_bounds(expand_btn, "展开")
         if not bounds:
             return False
+        root = dump_root()
+        if root is not None:
+            parent = {}
+            for item in root.iter("node"):
+                for child in item:
+                    parent[child] = item
+            for node in root.iter("node"):
+                node_bounds = parse_bounds(node.attrib.get("bounds"))
+                if node_bounds != tuple(bounds):
+                    continue
+                target = node
+                while target is not None and target.attrib.get("clickable") != "true":
+                    target = parent.get(target)
+                target_bounds = parse_bounds(target.attrib.get("bounds")) if target is not None else None
+                if target_bounds and target_bounds[2] > target_bounds[0] and target_bounds[3] > target_bounds[1]:
+                    print("点击展开更多金币任务父节点", target_bounds)
+                    human_click_bounds(target_bounds)
+                    expanded_more_tasks = True
+                    time.sleep(1)
+                    return True
         print("点击展开更多金币任务", bounds)
         human_click_bounds(bounds)
         expanded_more_tasks = True
