@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0143"
+VERSION = "coin-row-xml-log-20260602-0228"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -885,9 +885,9 @@ def find_jump_energy_button():
     return bounds, text, energy
 
 
-def looks_like_blocking_overlay(root, base_bounds):
+def find_blocking_overlay(root, base_bounds):
     if root is None or not base_bounds:
-        return False
+        return None
     base_top = base_bounds[1]
     overlay_words = ["关闭", "去赚体力", "立即领取", "领取", "确认", "知道了", "我知道了"]
     for node in root.iter("node"):
@@ -901,8 +901,26 @@ def looks_like_blocking_overlay(root, base_bounds):
             continue
         if node.attrib.get("clickable") == "true" and any(word in text for word in overlay_words):
             print("疑似遮挡弹窗控件", text, bounds)
+            return {"text": text, "bounds": bounds}
+    return None
+
+
+def looks_like_blocking_overlay(root, base_bounds):
+    return find_blocking_overlay(root, base_bounds) is not None
+
+
+def wait_while_jump_overlay_blocking(base_bounds):
+    while True:
+        if should_stop():
             return True
-    return False
+        wait_if_paused()
+        root = dump_root()
+        overlay = find_blocking_overlay(root, base_bounds)
+        if not overlay:
+            print("跳一跳疑似遮挡已消失，继续")
+            return False
+        print("跳一跳疑似被遮挡，等待人工处理", overlay["text"], overlay["bounds"])
+        time.sleep(5)
 
 
 def run_jump_energy_if_visible():
@@ -933,12 +951,9 @@ def run_jump_energy_if_visible():
         did_run = True
         time.sleep(5)
         root = dump_root()
-        if looks_like_blocking_overlay(root, bounds):
-            print("长按跳一跳后疑似被遮挡，等待5秒后再按Back")
-            time.sleep(5)
-            print("长按跳一跳后疑似被遮挡，按Back关闭遮挡")
-            human_back()
-            time.sleep(1.5)
+        if find_blocking_overlay(root, bounds):
+            if wait_while_jump_overlay_blocking(bounds):
+                return did_run
             continue
         if energy is None:
             print("跳一跳未解析到剩余体力，只执行一次")
