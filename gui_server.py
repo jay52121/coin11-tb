@@ -134,24 +134,8 @@ def restart_service_worker():
         stop_task_process_for_service_restart()
     except Exception as exc:
         append_log(f"服务重启：停止任务失败 {exc}")
-    log_path = BASE_DIR / "logs" / "gui_server.log"
-    log_path.parent.mkdir(exist_ok=True)
-    log_file = log_path.open("a", encoding="utf-8", buffering=1)
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    env["TJB_DISABLE_AUTO_START"] = "1"
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-    subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "gui_server:app", "--host", "127.0.0.1", "--port", "8765"],
-        cwd=str(BASE_DIR),
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        env=env,
-        creationflags=creationflags,
-    )
-    os._exit(0)
+    append_log("服务重启：退出当前服务，等待启动脚本重新拉起")
+    os._exit(23)
 
 
 @app.on_event("startup")
