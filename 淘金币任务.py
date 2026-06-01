@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-1729"
+VERSION = "coin-row-xml-log-20260601-1745"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -188,6 +188,14 @@ def human_click(x, y, radius=8, hold=None):
 def human_click_bounds(bounds, radius=8):
     x, y = center(bounds)
     human_click(x, y, radius=radius)
+
+
+def human_long_press_bounds(bounds, hold=3.0, radius=8):
+    x, y = center(bounds)
+    x, y = jitter_point(x, y, radius)
+    print("模拟长按", x, y, f"{hold:.2f}S")
+    d.long_click(x, y, hold)
+    time.sleep(random.uniform(0.18, 0.35))
 
 
 def human_swipe(x1, y1, x2, y2, duration=0.45, wiggle=24):
@@ -790,6 +798,59 @@ def enter_energy_task_list_from_coin_home(max_wait=8):
         time.sleep(1)
     print("未找到赚体力入口，不能切到赚金币")
     return False
+
+
+def find_jump_energy_button():
+    root = dump_root()
+    if root is None:
+        return None
+    candidates = []
+    for node in root.iter("node"):
+        text = node.attrib.get("text") or node.attrib.get("content-desc") or ""
+        if "跳一跳" not in text or "体力" not in text:
+            continue
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not bounds:
+            continue
+        match = re.search(r"剩余\s*(\d+)\s*体力", text)
+        energy = int(match.group(1)) if match else None
+        candidates.append((bounds[1], bounds[0], bounds, text, energy))
+    if not candidates:
+        return None
+    _, _, bounds, text, energy = sorted(candidates)[0]
+    return bounds, text, energy
+
+
+def run_jump_energy_if_visible():
+    miss_count = 0
+    did_run = False
+    while True:
+        if should_stop():
+            return did_run
+        wait_if_paused()
+        found = find_jump_energy_button()
+        if not found:
+            if not did_run:
+                return False
+            miss_count += 1
+            print("跳一跳拿钱暂时不可见，等待后重试", miss_count)
+            if miss_count > 2:
+                return did_run
+            time.sleep(5)
+            continue
+        miss_count = 0
+        bounds, text, energy = found
+        print("发现跳一跳拿钱", text, bounds, "剩余体力", energy)
+        if energy is not None and energy <= 0:
+            print("跳一跳剩余体力为0，停止")
+            return did_run
+        set_action("doing_jump_energy", current_task="跳一跳拿钱")
+        human_long_press_bounds(bounds, hold=3.0, radius=10)
+        did_run = True
+        time.sleep(5)
+        if energy is None:
+            print("跳一跳未解析到剩余体力，只执行一次")
+            return did_run
 
 
 def wait_for_task_list_after_entry(max_wait=12):
@@ -1691,6 +1752,7 @@ def energy_task_loop():
     no_task_scroll_count = 0
     if not ensure_energy_task_list_at_start():
         return False
+    run_jump_energy_if_visible()
     print("进入做体力任务执行循环")
     while True:
         try:
@@ -1699,6 +1761,8 @@ def energy_task_loop():
                 return False
             wait_if_paused()
             time.sleep(1)
+            if run_jump_energy_if_visible():
+                continue
             page_type, package_name, activity_name, texts = classify_current_page()
             print("做体力操作前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:10]})
             if page_type == "energy_task_list":
@@ -1779,6 +1843,8 @@ def main_loop():
             time.sleep(1)
             page_type, package_name, activity_name, texts = classify_current_page()
             print("操作前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
+            if run_jump_energy_if_visible():
+                continue
             if page_type == "good_shop_page":
                 handle_good_shop_task()
                 continue
