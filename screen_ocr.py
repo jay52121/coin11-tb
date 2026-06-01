@@ -14,24 +14,27 @@ def get_reader(gpu=True):
     return _reader
 
 
-def resize_for_ocr(image, max_width=640):
+def resize_for_ocr(image, scale_factor=0.5):
     height, width = image.shape[:2]
-    if width <= max_width:
+    if scale_factor >= 1.0:
         return image, 1.0
-    scale = max_width / width
-    resized = cv2.resize(image, (max_width, int(height * scale)), interpolation=cv2.INTER_AREA)
-    return resized, scale
+    resized = cv2.resize(
+        image,
+        (max(1, int(width * scale_factor)), max(1, int(height * scale_factor))),
+        interpolation=cv2.INTER_AREA,
+    )
+    return resized, scale_factor
 
 
 def normalize_text(text):
     return text.replace(" ", "").replace("己", "已")
 
 
-def image_has_text(image, target_text, max_width=640, gpu=True, min_confidence=0.2):
+def image_has_text(image, target_text, scale_factor=0.5, gpu=True, min_confidence=0.2):
     timings = {}
     started = time.perf_counter()
 
-    resized, scale = resize_for_ocr(image, max_width=max_width)
+    resized, scale = resize_for_ocr(image, scale_factor=scale_factor)
     timings["scale"] = scale
 
     ocr_started = time.perf_counter()
@@ -49,11 +52,11 @@ def image_has_text(image, target_text, max_width=640, gpu=True, min_confidence=0
     return bool(hits), hits, timings
 
 
-def read_ocr_results(image, max_width=640, gpu=True, min_confidence=0.2):
+def read_ocr_results(image, scale_factor=0.5, gpu=True, min_confidence=0.2):
     timings = {}
     started = time.perf_counter()
 
-    resized, scale = resize_for_ocr(image, max_width=max_width)
+    resized, scale = resize_for_ocr(image, scale_factor=scale_factor)
     timings["scale"] = scale
 
     ocr_started = time.perf_counter()
@@ -78,14 +81,14 @@ def read_ocr_results(image, max_width=640, gpu=True, min_confidence=0.2):
     return items, timings
 
 
-def screen_has_text(d, target_text, max_width=640, gpu=True, min_confidence=0.2):
+def screen_has_text(d, target_text, scale_factor=0.5, gpu=True, min_confidence=0.2):
     started = time.perf_counter()
     screenshot = d.screenshot(format="opencv")
     screenshot_time = time.perf_counter() - started
     ok, hits, timings = image_has_text(
         screenshot,
         target_text,
-        max_width=max_width,
+        scale_factor=scale_factor,
         gpu=gpu,
         min_confidence=min_confidence,
     )
