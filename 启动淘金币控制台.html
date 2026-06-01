@@ -67,12 +67,27 @@
   </main>
 
   <script>
+    async function waitForService() {
+      const url = 'http://127.0.0.1:8765/?no_auto_start=1';
+      const deadline = Date.now() + 30000;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        try {
+          await fetch(`http://127.0.0.1:8765/api/status?t=${Date.now()}`, { mode: 'no-cors', cache: 'no-store' });
+          document.getElementById('status').textContent = '服务已启动，正在打开控制台...';
+          window.open(url, '_blank');
+          return;
+        } catch (err) {
+          document.getElementById('status').textContent = '正在等待本地服务启动...';
+        }
+      }
+      document.getElementById('status').textContent = '仍未检测到服务。请重新安装一键启动协议，或查看 logs/gui_server.log。';
+    }
+
     function startService() {
       document.getElementById('status').textContent = '正在请求 Windows 启动本地服务...';
       window.location.href = 'tjb-gui://start';
-      setTimeout(() => {
-        window.open('http://127.0.0.1:8765/?no_auto_start=1', '_blank');
-      }, 2500);
+      waitForService();
     }
   </script>
 </body>

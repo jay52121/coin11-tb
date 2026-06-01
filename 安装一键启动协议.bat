@@ -1,18 +1,14 @@
 @echo off
 cd /d "%~dp0"
 
-set "TARGET=%~dp0淘金币启动.bat"
+set "TARGET=%~dp0start_tjb_gui.vbs"
 
 echo Installing local protocol: tjb-gui://
 echo Target:
 echo %TARGET%
 echo.
 
-reg add "HKCU\Software\Classes\tjb-gui" /ve /d "URL:Taojinbi GUI Launcher" /f >nul
-reg add "HKCU\Software\Classes\tjb-gui" /v "URL Protocol" /d "" /f >nul
-reg add "HKCU\Software\Classes\tjb-gui\shell" /f >nul
-reg add "HKCU\Software\Classes\tjb-gui\shell\open" /f >nul
-reg add "HKCU\Software\Classes\tjb-gui\shell\open\command" /ve /d "\"%TARGET%\" \"%%1\"" /f >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$base='HKCU:\Software\Classes\tjb-gui'; New-Item -Path $base -Force | Out-Null; Set-ItemProperty -Path $base -Name '(default)' -Value 'URL:Taojinbi GUI Launcher'; New-ItemProperty -Path $base -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null; New-Item -Path ($base + '\shell\open\command') -Force | Out-Null; Set-ItemProperty -Path ($base + '\shell\open\command') -Name '(default)' -Value 'wscript.exe \"%TARGET%\" \"%%1\"'"
 
 echo Done.
 echo You can now open:
