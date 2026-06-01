@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260530-0211"
+VERSION = "coin-row-xml-log-20260601-1458"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -482,6 +482,26 @@ def good_shop_entry_key_from_xml(root, action_bounds):
     return f"entry:{action_bounds}"
 
 
+def good_shop_entry_has_reward_xml(root, action_bounds):
+    action_y = (action_bounds[1] + action_bounds[3]) // 2
+    for node in root.iter("node"):
+        text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not text or not bounds:
+            continue
+        y_center = (bounds[1] + bounds[3]) // 2
+        if abs(y_center - action_y) > 90 or bounds[0] < action_bounds[0]:
+            continue
+        if text == "+" or re.fullmatch(r"\+?\d+", text):
+            return True
+    return False
+
+
+def good_shop_entry_sort_key(text, has_reward, bounds):
+    no_reward_revisit = "再逛逛" in (text or "") and not has_reward
+    return (0 if has_reward else 1, 1 if no_reward_revisit else 0, bounds[1], bounds[0])
+
+
 def find_good_shop_entry_candidates():
     root = dump_root()
     if root is None:
@@ -500,8 +520,9 @@ def find_good_shop_entry_candidates():
             continue
         seen.add(bounds)
         key = good_shop_entry_key_from_xml(root, bounds)
-        entries.append((bounds[1], bounds[0], bounds, text, key))
-    return [(bounds, text, key) for _, _, bounds, text, key in sorted(entries)]
+        has_reward = good_shop_entry_has_reward_xml(root, bounds)
+        entries.append((*good_shop_entry_sort_key(text, has_reward, bounds), bounds, text, key, has_reward))
+    return [(bounds, text, key, has_reward) for *_, bounds, text, key, has_reward in sorted(entries)]
 
 
 def good_shop_entry_key_from_ocr(items, action_bounds):
@@ -517,6 +538,19 @@ def good_shop_entry_key_from_ocr(items, action_bounds):
     return f"ocr-entry:{action_bounds}"
 
 
+def good_shop_entry_has_reward_ocr(items, action_bounds):
+    action_y = (action_bounds[1] + action_bounds[3]) // 2
+    for item in items:
+        text = (item.get("text") or "").strip()
+        bounds = item["bounds"]
+        y_center = (bounds[1] + bounds[3]) // 2
+        if abs(y_center - action_y) > 90 or bounds[0] < action_bounds[0]:
+            continue
+        if text == "+" or re.fullmatch(r"\+?\d+", normalize_text(text)):
+            return True
+    return False
+
+
 def find_good_shop_entry_candidates_by_ocr():
     items = scan_ocr_once("逛好店入口")
     entries = []
@@ -529,8 +563,9 @@ def find_good_shop_entry_candidates_by_ocr():
         if not ocr_text_contains(item["text"], words):
             continue
         key = good_shop_entry_key_from_ocr(items, bounds)
-        entries.append((bounds[1], bounds[0], bounds, item["text"], key))
-    return [(bounds, text, key) for _, _, bounds, text, key in sorted(entries)]
+        has_reward = good_shop_entry_has_reward_ocr(items, bounds)
+        entries.append((*good_shop_entry_sort_key(item["text"], has_reward, bounds), bounds, item["text"], key, has_reward))
+    return [(bounds, text, key, has_reward) for *_, bounds, text, key, has_reward in sorted(entries)]
 
 
 def looks_like_shop_browse_task(task_name, texts):
@@ -1255,13 +1290,16 @@ def click_good_shop_entry_once(texts):
     candidates = find_good_shop_entry_candidates()
     if not candidates:
         candidates = find_good_shop_entry_candidates_by_ocr()
-    print("逛好店入口候选", [(text, key, bounds) for bounds, text, key in candidates[:8]])
-    for bounds, text, key in candidates:
+    print("逛好店入口候选", [(text, key, bounds, "有奖励" if has_reward else "无奖励") for bounds, text, key, has_reward in candidates[:8]])
+    for bounds, text, key, has_reward in candidates:
         if key in good_shop_failed_entry_keys:
             print("跳过刚才点击无效的逛好店入口", key)
             continue
         if good_shop_entry_clicks.get(key, 0) >= 5:
             print("跳过同一店铺入口，已点击5次", key)
+            continue
+        if "再逛逛" in text and not has_reward and any(candidate_has_reward for _, _, _, candidate_has_reward in candidates):
+            print("跳过无奖励再逛逛，优先点击有奖励入口", key)
             continue
         break
     else:
