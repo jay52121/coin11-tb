@@ -373,7 +373,7 @@
     };
 
     const ruleMeta = {
-      action_text_pattern: ['动作按钮正则', 'pattern', '用于匹配“去完成/去逛逛”等按钮文本；正则命中后作为可点击任务按钮。'],
+      action_text_pattern: ['动作按钮正则', 'pattern-list', '用于匹配“去完成/去逛逛”等按钮文本；保存时自动用 | 拼成正则。'],
       skip_task_extra_words: ['排除任务扩展词', 'list', '更长的跳过词库；任务名包含任一词就跳过。'],
       done_words: ['已完成任务词', 'list', '用于判断任务行/任务名是否已经完成；命中后不再点击该任务。'],
       search_browse_words: ['搜索浏览页词', 'list', '页面文本包含任一词时，认为是搜索浏览奖励页。'],
@@ -393,7 +393,7 @@
       earn_more_words: ['赚更多金币词', 'list', '匹配进入任务列表的“赚更多金币”入口。'],
       earn_words: ['赚金币词', 'list', '兜底匹配“赚金币”入口。'],
       expand_words: ['展开词', 'list', '匹配更多任务展开入口；会优先点击可点击父节点。'],
-      reward_button_pattern: ['奖励按钮正则', 'pattern', '匹配“领取奖励/立即领取/点击得”等奖励按钮；正则命中后点击领取。'],
+      reward_button_pattern: ['奖励按钮正则', 'pattern-list', '匹配“领取奖励/立即领取/点击得”等奖励按钮；保存时自动用 | 拼成正则。'],
       ocr_done_text: ['OCR完成文字', 'text', '浏览任务中每 5 秒 OCR 查找该文字；命中后提前返回。'],
       ocr_done_extra_words: ['OCR辅助完成文字', 'list', '同样每 5 秒 OCR 查找；用于完成浮层里的辅助提示。']
     };
@@ -580,6 +580,11 @@
       return Array.isArray(value) ? value.join('\n') : String(value ?? '');
     }
 
+    function patternToTags(value) {
+      if (Array.isArray(value)) return normalizeTags(value);
+      return String(value ?? '').split('|').map(v => v.trim()).filter(Boolean);
+    }
+
     function textToRuleValue(textValue, type) {
       if (type === 'list') {
         return textValue.split(/\n|,|，/).map(v => v.trim()).filter(Boolean);
@@ -605,13 +610,13 @@
         help.className = 'rule-help';
         help.textContent = meta[2];
         info.append(label, help);
-        if (meta[1] === 'list') {
+        if (meta[1] === 'list' || meta[1] === 'pattern-list') {
           const editor = document.createElement('div');
           editor.id = `rule_${key}`;
           editor.className = 'tag-editor';
           editor.dataset.ruleKey = key;
           editor.dataset.ruleType = meta[1];
-          renderTagEditor(editor, rules[key]);
+          renderTagEditor(editor, meta[1] === 'pattern-list' ? patternToTags(rules[key]) : rules[key]);
           control.append(editor);
         } else {
           const input = document.createElement('input');
@@ -630,7 +635,8 @@
       const payload = {};
       document.querySelectorAll('[data-rule-key]').forEach(control => {
         if (control.classList.contains('tag-editor')) {
-          payload[control.dataset.ruleKey] = getTagEditorValues(control);
+          const values = getTagEditorValues(control);
+          payload[control.dataset.ruleKey] = control.dataset.ruleType === 'pattern-list' ? values.join('|') : values;
           return;
         }
         payload[control.dataset.ruleKey] = textToRuleValue(control.value, control.dataset.ruleType);
