@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2242"
+VERSION = "coin-row-xml-log-20260601-2243"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -1761,25 +1761,30 @@ def ensure_task_list_at_start():
 
 def ensure_energy_task_list_at_start():
     set_action("finding_entry")
-    page_type, package_name, activity_name, texts, _ = log_page_position("做体力启动前页面定位")
-    if page_type == "energy_task_list":
-        return True
-    if page_type == "coin_home":
-        return enter_energy_task_list_from_coin_home(max_wait=10)
-    print("做体力模式当前不在淘金币首页，先打开淘金币入口")
-    open_coin_home_direct(stop=True)
-    deadline = time.time() + 18
-    while time.time() < deadline:
-        wait_if_paused()
-        if should_stop():
-            return False
-        page_type, package_name, activity_name, texts = classify_current_page()
-        print("做体力入口后页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
+    for attempt in range(2):
+        page_type, package_name, activity_name, texts, _ = log_page_position(f"做体力启动前页面定位 attempt={attempt + 1}")
         if page_type == "energy_task_list":
             return True
         if page_type == "coin_home":
-            return enter_energy_task_list_from_coin_home(max_wait=10)
-        time.sleep(1)
+            if enter_energy_task_list_from_coin_home(max_wait=10):
+                return True
+            print("做体力启动阶段未找到赚体力入口，强制重开淘金币入口")
+            open_coin_home_direct(stop=True)
+            continue
+        print("做体力模式当前不在淘金币首页，先打开淘金币入口")
+        open_coin_home_direct(stop=True)
+        deadline = time.time() + 18
+        while time.time() < deadline:
+            wait_if_paused()
+            if should_stop():
+                return False
+            page_type, package_name, activity_name, texts = classify_current_page()
+            print("做体力入口后页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
+            if page_type == "energy_task_list":
+                return True
+            if page_type == "coin_home" and enter_energy_task_list_from_coin_home(max_wait=10):
+                return True
+            time.sleep(1)
     message = "做体力模式打开淘金币入口后仍未进入体力任务页，正常结束"
     print(message)
     append_key_log(message)
