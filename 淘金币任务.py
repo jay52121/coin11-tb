@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-1639"
+VERSION = "coin-row-xml-log-20260601-1729"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -137,7 +137,10 @@ def rule_text(name, default=""):
 
 
 def action_text_pattern():
-    return rule_text("action_text_pattern")
+    pattern = rule_text("action_text_pattern")
+    if "去兑换" not in pattern:
+        pattern = f"{pattern}|去兑换" if pattern else "去兑换"
+    return pattern
 
 
 def wait_if_paused():
@@ -427,6 +430,10 @@ def looks_like_task_list_page(texts=None):
 
 def task_list_is_at_bottom(texts):
     return has_any(texts, rule_list("task_list_bottom_words", ["收起更多任务"]))
+
+
+def energy_task_list_is_at_bottom(texts):
+    return has_any(texts, ["以上奖励均为最高奖励", "实际获得奖励为准"])
 
 
 def looks_like_more_coin_expand_section(texts):
@@ -770,7 +777,9 @@ def enter_energy_task_list_from_coin_home(max_wait=8):
         page_type, package_name, activity_name, texts = classify_current_page()
         if page_type == "energy_task_list":
             return True
-        energy_btn = d(classNameMatches=ACTION_CLASS, textMatches="赚体力")
+        energy_btn = d(resourceId="energy_task_button")
+        if not energy_btn.exists(timeout=0.2):
+            energy_btn = d(classNameMatches=ACTION_CLASS, textMatches="赚体力")
         if energy_btn.exists(timeout=0.6):
             bounds = safe_obj_bounds(energy_btn, "赚体力")
             if bounds:
@@ -1237,7 +1246,7 @@ def find_coin_row_buttons():
 
 
 def ocr_action_words():
-    return ["去完成", "逛一逛", "立即领", "领取奖励", "去逛逛", "爱心捐"]
+    return ["去完成", "逛一逛", "立即领", "领取奖励", "去逛逛", "爱心捐", "去兑换"]
 
 
 def ocr_text_contains(text, words):
@@ -1288,7 +1297,7 @@ def find_ocr_task_action_buttons():
 def ocr_task_list_is_at_bottom():
     screenshot = d.screenshot(format="opencv")
     items, timings = read_ocr_results(screenshot, max_width=900, gpu=True, min_confidence=0.25)
-    bottom_words = ["收起更多任务", "注：以上金币额"]
+    bottom_words = ["收起更多任务", "注：以上金币额", "以上奖励均为最高奖励", "实际获得奖励为准"]
     hits = [item for item in items if ocr_text_contains(item["text"], bottom_words)]
     print("OCR底部判断", bool(hits), [(item["text"], item["bounds"]) for item in hits[:3]], {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
     return bool(hits)
@@ -1668,7 +1677,9 @@ def ensure_energy_task_list_at_start():
     page_type, package_name, activity_name, texts, _ = log_page_position("做体力启动前页面定位")
     if page_type == "energy_task_list":
         return True
-    message = "做体力模式只处理当前已打开的做任务赚体力页面，不自动寻找入口"
+    if page_type == "coin_home":
+        return enter_energy_task_list_from_coin_home(max_wait=10)
+    message = "做体力模式未在淘金币首页或做任务赚体力页面，正常结束"
     print(message)
     append_key_log(message)
     update_status(last_error=message, action="idle")
@@ -1707,6 +1718,12 @@ def energy_task_loop():
                     continue
                 no_task_scroll_count += 1
                 print("做体力未找到可点击按钮，继续下翻", no_task_scroll_count)
+                if energy_task_list_is_at_bottom(texts):
+                    print("做体力任务列表已到底部且本页无可点击任务，认为体力任务已全部完成")
+                    append_key_log("做体力任务已完成，切换淘金币任务")
+                    have_clicked.clear()
+                    invalid_click_keys.clear()
+                    return True
                 if no_task_scroll_count <= 8:
                     scroll_task_list_once()
                     continue
