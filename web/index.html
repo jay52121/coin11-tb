@@ -371,6 +371,7 @@
 
     async function restartService() {
       document.getElementById('restart_service_btn').disabled = true;
+      sessionStorage.setItem('skip_auto_start_once', '1');
       await fetch('/api/service/restart', { method: 'POST' });
       document.getElementById('running').textContent = '服务重启中';
       waitForServiceAndReload();
@@ -394,6 +395,10 @@
     }
 
     async function autoStartOnLoad() {
+      if (sessionStorage.getItem('skip_auto_start_once') === '1') {
+        sessionStorage.removeItem('skip_auto_start_once');
+        return;
+      }
       await post('/api/start');
     }
 
