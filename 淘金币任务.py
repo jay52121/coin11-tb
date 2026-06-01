@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2243"
+VERSION = "coin-row-xml-log-20260601-2246"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -1766,6 +1766,7 @@ def ensure_energy_task_list_at_start():
         if page_type == "energy_task_list":
             return True
         if page_type == "coin_home":
+            run_jump_energy_if_visible()
             if enter_energy_task_list_from_coin_home(max_wait=10):
                 return True
             print("做体力启动阶段未找到赚体力入口，强制重开淘金币入口")
@@ -1782,8 +1783,10 @@ def ensure_energy_task_list_at_start():
             print("做体力入口后页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
             if page_type == "energy_task_list":
                 return True
-            if page_type == "coin_home" and enter_energy_task_list_from_coin_home(max_wait=10):
-                return True
+            if page_type == "coin_home":
+                run_jump_energy_if_visible()
+                if enter_energy_task_list_from_coin_home(max_wait=10):
+                    return True
             time.sleep(1)
     message = "做体力模式打开淘金币入口后仍未进入体力任务页，正常结束"
     print(message)
@@ -1798,7 +1801,6 @@ def energy_task_loop():
     coin_home_fail_count = 0
     if not ensure_energy_task_list_at_start():
         return False
-    run_jump_energy_if_visible()
     print("进入做体力任务执行循环")
     while True:
         try:
@@ -1807,8 +1809,6 @@ def energy_task_loop():
                 return False
             wait_if_paused()
             time.sleep(1)
-            if run_jump_energy_if_visible():
-                continue
             page_type, package_name, activity_name, texts = classify_current_page()
             print("做体力操作前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:10]})
             if page_type == "energy_task_list":
@@ -1844,6 +1844,7 @@ def energy_task_loop():
                 return True
             if page_type in ["quiz", "shop_subscribe_task", "task_done", "taobao_browse_task", "external_app", "coin_home", "unknown_taobao_page"]:
                 if page_type == "coin_home":
+                    run_jump_energy_if_visible()
                     if enter_energy_task_list_from_coin_home(max_wait=5):
                         coin_home_fail_count = 0
                         continue
