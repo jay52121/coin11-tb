@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2306"
+VERSION = "coin-row-xml-log-20260601-2313"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
@@ -620,10 +620,6 @@ def classify_current_page():
         page_type = "daily_task_list"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
-    if package_name != TB_APP:
-        page_type = "external_app"
-        set_page(page_type, activity=activity_name or "", running=True, paused=False)
-        return page_type, package_name, activity_name, texts
     if has_any(texts, rule_list("quiz_words", ["淘金币趣味答题", "我选好了"])):
         page_type = "quiz"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
@@ -646,6 +642,10 @@ def classify_current_page():
         return page_type, package_name, activity_name, texts
     if looks_like_browse_task_page(texts, activity_name or ""):
         page_type = "taobao_browse_task"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
+    if package_name != TB_APP:
+        page_type = "external_app"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
     page_type = "unknown_taobao_page"
