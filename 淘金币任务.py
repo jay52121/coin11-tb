@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2246"
+VERSION = "coin-row-xml-log-20260601-2250"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
@@ -861,8 +861,8 @@ def run_jump_energy_if_visible():
         miss_count = 0
         bounds, text, energy = found
         print("发现跳一跳拿钱", text, bounds, "剩余体力", energy)
-        if energy is not None and energy <= 0:
-            print("跳一跳剩余体力为0，停止")
+        if energy is not None and energy <= 50:
+            print("跳一跳剩余体力不超过50，停止")
             return did_run
         set_action("doing_jump_energy", current_task="跳一跳拿钱")
         human_long_press_bounds(bounds, hold=3.0, radius=10)
