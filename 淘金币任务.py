@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2313"
+VERSION = "coin-row-xml-log-20260602-0001"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
@@ -530,8 +530,7 @@ def good_shop_entry_has_reward_xml(root, action_bounds):
 
 
 def good_shop_entry_sort_key(text, has_reward, bounds):
-    no_reward_revisit = "再逛逛" in (text or "") and not has_reward
-    return (0 if has_reward else 1, 1 if no_reward_revisit else 0, bounds[1], bounds[0])
+    return (0 if has_reward else 1, bounds[1], bounds[0])
 
 
 def find_good_shop_entry_candidates():
@@ -540,7 +539,7 @@ def find_good_shop_entry_candidates():
         return []
     entries = []
     seen = set()
-    words = ["逛店铺", "再逛逛", "最多还可领", "最多还可以领"]
+    words = ["逛店铺", "最多还可领", "最多还可以领"]
     for node in root.iter("node"):
         text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
         if not text or not any(word in text for word in words):
@@ -586,7 +585,7 @@ def good_shop_entry_has_reward_ocr(items, action_bounds):
 def find_good_shop_entry_candidates_by_ocr():
     items = scan_ocr_once("逛好店入口")
     entries = []
-    words = ["逛店铺", "再逛逛", "最多还可领", "最多还可以领"]
+    words = ["逛店铺", "最多还可领", "最多还可以领"]
     for item in items:
         bounds = item["bounds"]
         x_center = (bounds[0] + bounds[2]) // 2
@@ -1486,9 +1485,6 @@ def click_good_shop_entry_once(texts):
             continue
         if good_shop_entry_clicks.get(key, 0) >= 5:
             print("跳过同一店铺入口，已点击5次", key)
-            continue
-        if "再逛逛" in text and not has_reward and any(candidate_has_reward for _, _, _, candidate_has_reward in candidates):
-            print("跳过无奖励再逛逛，优先点击有奖励入口", key)
             continue
         break
     else:
