@@ -100,11 +100,13 @@
       border-radius: 4px;
       font-size: 14px;
     }
-    input.coin-input {
+    input.coin-input,
+    .tag-editor.coin {
       border-color: #d97706;
       border-width: 2px;
     }
-    input.energy-input {
+    input.energy-input,
+    .tag-editor.energy {
       border-color: #7c3aed;
       border-width: 2px;
     }
@@ -123,33 +125,98 @@
       color: #6d28d9;
       font-weight: 600;
     }
-    textarea {
-      width: 100%;
-      min-height: 96px;
-      box-sizing: border-box;
-      padding: 10px;
-      border: 1px solid #b8c2cc;
-      border-radius: 4px;
-      font-family: "Microsoft YaHei", sans-serif;
-      font-size: 13px;
-      line-height: 1.45;
-      resize: vertical;
-    }
-    .rules-grid {
+    .rules-list {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .rule-row {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
       gap: 14px;
+      align-items: start;
+      padding: 12px 0;
+      border-top: 1px solid #e5e7eb;
     }
     .rule-name {
       margin-bottom: 6px;
       color: #52616f;
       font-size: 13px;
+      font-weight: 600;
     }
     .rule-help {
-      margin-bottom: 8px;
       color: #7b8794;
       font-size: 12px;
       line-height: 1.35;
+    }
+    .rule-input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .tag-editor {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: start;
+      min-height: 38px;
+      box-sizing: border-box;
+      padding: 8px;
+      border: 1px solid #b8c2cc;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 34px;
+      align-items: center;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      max-width: 100%;
+      padding: 4px 7px;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #1f2933;
+      font-size: 13px;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+    .tag-editor.coin .tag {
+      border-color: #f59e0b;
+      background: #fffbeb;
+      color: #92400e;
+    }
+    .tag-editor.energy .tag {
+      border-color: #a78bfa;
+      background: #f5f3ff;
+      color: #6d28d9;
+    }
+    .tag-remove {
+      min-width: 20px;
+      width: 20px;
+      height: 20px;
+      margin: 0;
+      padding: 0;
+      border-radius: 999px;
+      border-color: transparent;
+      background: transparent;
+      color: inherit;
+      line-height: 18px;
+    }
+    .tag-add {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) auto;
+      gap: 6px;
+      min-width: 260px;
+    }
+    .tag-add button {
+      min-width: 58px;
+      margin-right: 0;
     }
     .grid {
       display: grid;
@@ -219,10 +286,10 @@
       <h2>排除任务标签</h2>
       <div class="exclude-grid">
         <div class="coin-label">金币任务</div>
-        <input id="coin_exclude_input" class="coin-input" type="text" value="下单,快手,评价,助力">
+        <div id="coin_exclude_editor" class="tag-editor coin"></div>
         <button class="coin-outline" onclick="saveExcludeTags('coin')">保存金币</button>
         <div class="energy-label">体力任务</div>
-        <input id="energy_exclude_input" class="energy-input" type="text" value="下单,快手,评价,助力,分享,每拉">
+        <div id="energy_exclude_editor" class="tag-editor energy"></div>
         <button class="energy-outline" onclick="saveExcludeTags('energy')">保存体力</button>
       </div>
     </section>
@@ -231,7 +298,7 @@
       <h2>文字匹配规则</h2>
       <button onclick="saveRules()">保存规则</button>
       <button onclick="loadRules()">重新加载</button>
-      <div id="rules" class="rules-grid"></div>
+      <div id="rules" class="rules-list"></div>
     </section>
   </main>
 
@@ -330,11 +397,88 @@
       await post('/api/start');
     }
 
+    function normalizeTags(value) {
+      if (Array.isArray(value)) {
+        return value.map(v => String(v).trim()).filter(Boolean);
+      }
+      return String(value ?? '').split(/\n|,|，/).map(v => v.trim()).filter(Boolean);
+    }
+
+    function tagEditorIsActive(editor) {
+      return editor && editor.contains(document.activeElement);
+    }
+
+    function getTagEditorValues(editorOrId) {
+      const editor = typeof editorOrId === 'string' ? document.getElementById(editorOrId) : editorOrId;
+      if (!editor) return [];
+      return Array.from(editor.querySelectorAll('.tag')).map(tag => tag.dataset.value).filter(Boolean);
+    }
+
+    function addTagToEditor(editor, value) {
+      const clean = String(value ?? '').trim();
+      if (!clean) return;
+      const current = new Set(getTagEditorValues(editor));
+      if (current.has(clean)) return;
+      renderTagEditor(editor, [...current, clean]);
+    }
+
+    function renderTagEditor(editor, values, options = {}) {
+      const items = normalizeTags(values);
+      const inputValue = options.keepInput ? (editor.querySelector('.tag-input')?.value || '') : '';
+      const list = document.createElement('div');
+      list.className = 'tag-list';
+      items.forEach(value => {
+        const tag = document.createElement('span');
+        const remove = document.createElement('button');
+        tag.className = 'tag';
+        tag.dataset.value = value;
+        tag.append(document.createTextNode(value));
+        remove.className = 'tag-remove';
+        remove.type = 'button';
+        remove.textContent = 'X';
+        remove.title = `删除 ${value}`;
+        remove.addEventListener('click', () => {
+          renderTagEditor(editor, getTagEditorValues(editor).filter(item => item !== value), { keepInput: true });
+        });
+        tag.append(remove);
+        list.append(tag);
+      });
+
+      const add = document.createElement('div');
+      const input = document.createElement('input');
+      const button = document.createElement('button');
+      add.className = 'tag-add';
+      input.className = 'tag-input';
+      input.type = 'text';
+      input.value = inputValue;
+      input.placeholder = '新增一项';
+      button.type = 'button';
+      button.textContent = '添加';
+      button.addEventListener('click', () => {
+        addTagToEditor(editor, input.value);
+      });
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          addTagToEditor(editor, input.value);
+        }
+      });
+      add.append(input, button);
+      editor.replaceChildren(list, add);
+    }
+
+    function renderExcludeEditor(kind, values) {
+      const editor = document.getElementById(kind === 'energy' ? 'energy_exclude_editor' : 'coin_exclude_editor');
+      if (!tagEditorIsActive(editor)) {
+        renderTagEditor(editor, values);
+      }
+    }
+
     async function saveExcludeTags(kind) {
       const isEnergy = kind === 'energy';
       const field = isEnergy ? 'energy_exclude_tags' : 'coin_exclude_tags';
-      const inputId = isEnergy ? 'energy_exclude_input' : 'coin_exclude_input';
-      const value = document.getElementById(inputId).value;
+      const editorId = isEnergy ? 'energy_exclude_editor' : 'coin_exclude_editor';
+      const value = getTagEditorValues(editorId);
       await fetch('/api/exclude-tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -367,25 +511,47 @@
       const container = document.getElementById('rules');
       container.replaceChildren(...Object.entries(ruleMeta).map(([key, meta]) => {
         const wrap = document.createElement('div');
+        const info = document.createElement('div');
+        const control = document.createElement('div');
         const label = document.createElement('div');
         const help = document.createElement('div');
-        const input = document.createElement('textarea');
+        wrap.className = 'rule-row';
+        info.className = 'rule-info';
+        control.className = 'rule-control';
         label.className = 'rule-name';
         label.textContent = `${meta[0]} (${key})`;
         help.className = 'rule-help';
         help.textContent = meta[2];
-        input.dataset.ruleKey = key;
-        input.dataset.ruleType = meta[1];
-        input.value = ruleValueToText(rules[key]);
-        wrap.append(label, help, input);
+        info.append(label, help);
+        if (meta[1] === 'list') {
+          const editor = document.createElement('div');
+          editor.id = `rule_${key}`;
+          editor.className = 'tag-editor';
+          editor.dataset.ruleKey = key;
+          editor.dataset.ruleType = meta[1];
+          renderTagEditor(editor, rules[key]);
+          control.append(editor);
+        } else {
+          const input = document.createElement('input');
+          input.className = 'rule-input';
+          input.dataset.ruleKey = key;
+          input.dataset.ruleType = meta[1];
+          input.value = ruleValueToText(rules[key]);
+          control.append(input);
+        }
+        wrap.append(info, control);
         return wrap;
       }));
     }
 
     async function saveRules() {
       const payload = {};
-      document.querySelectorAll('[data-rule-key]').forEach(input => {
-        payload[input.dataset.ruleKey] = textToRuleValue(input.value, input.dataset.ruleType);
+      document.querySelectorAll('[data-rule-key]').forEach(control => {
+        if (control.classList.contains('tag-editor')) {
+          payload[control.dataset.ruleKey] = getTagEditorValues(control);
+          return;
+        }
+        payload[control.dataset.ruleKey] = textToRuleValue(control.value, control.dataset.ruleType);
       });
       await fetch('/api/rules', {
         method: 'POST',
@@ -482,12 +648,8 @@
         `金币: ${coinExcludeTags.length ? coinExcludeTags.join(', ') : '-'}`,
         `体力: ${energyExcludeTags.length ? energyExcludeTags.join(', ') : '-'}`
       ].join('；');
-      if (document.activeElement !== document.getElementById('coin_exclude_input')) {
-        document.getElementById('coin_exclude_input').value = coinExcludeTags.join(',');
-      }
-      if (document.activeElement !== document.getElementById('energy_exclude_input')) {
-        document.getElementById('energy_exclude_input').value = energyExcludeTags.join(',');
-      }
+      renderExcludeEditor('coin', coinExcludeTags);
+      renderExcludeEditor('energy', energyExcludeTags);
       document.getElementById('last_error').textContent = text(status.last_error);
       document.getElementById('updated_at').textContent = text(status.updated_at);
 
