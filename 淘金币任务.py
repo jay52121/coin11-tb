@@ -14,8 +14,9 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260601-2250"
+VERSION = "coin-row-xml-log-20260601-2306"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
+ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
 BROWSE_TASK_DURATION = 30
 BACK_RESTART_LIMIT = 4
@@ -32,6 +33,7 @@ ocr_done_event = threading.Event()
 ocr_check_running = False
 
 print(f"淘金币任务脚本版本: {VERSION}")
+print(f"Android用户: {ANDROID_USER_ID}")
 selected_device = select_device()
 d = u2.connect(selected_device)
 print(f"已成功连接设备：{selected_device}")
@@ -79,6 +81,7 @@ ctx.start()
 
 def update_status(**kwargs):
     kwargs.setdefault("version", VERSION)
+    kwargs.setdefault("android_user_id", ANDROID_USER_ID)
     write_gui_status(**kwargs)
 
 
@@ -684,15 +687,33 @@ def log_page_position(reason):
     return page_type, package_name, activity_name, texts, page_signature(page_type, package_name, activity_name, texts)
 
 
+def shell_quote(value):
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def shell_user_arg():
+    return f"--user {ANDROID_USER_ID}" if ANDROID_USER_ID and ANDROID_USER_ID != "0" else ""
+
+
+def stop_app_for_user(package):
+    user_arg = shell_user_arg()
+    if user_arg:
+        d.shell(f"am force-stop {user_arg} {package}")
+    else:
+        d.app_stop(package)
+
+
 def open_coin_home_direct(stop=True):
     global expanded_more_tasks
     expanded_more_tasks = False
     set_action("finding_entry")
     if stop:
-        print("强制关闭淘宝后立即启动淘金币入口")
-        d.app_stop(TB_APP)
-    print("启动淘金币入口")
-    d.shell(f"am start -a android.intent.action.VIEW -d '{COIN_HOME_URL}' {TB_APP}")
+        print("强制关闭淘宝后立即启动淘金币入口", {"user": ANDROID_USER_ID})
+        stop_app_for_user(TB_APP)
+    print("启动淘金币入口", {"user": ANDROID_USER_ID})
+    user_arg = shell_user_arg()
+    user_part = f"{user_arg} " if user_arg else ""
+    d.shell(f"am start {user_part}-a android.intent.action.VIEW -d {shell_quote(COIN_HOME_URL)} -p {TB_APP}")
     time.sleep(4)
 
 
@@ -700,7 +721,7 @@ def stop_known_external_apps():
     for package in ["com.tmall.wireless"]:
         try:
             print("关闭外部App", package)
-            d.app_stop(package)
+            stop_app_for_user(package)
         except Exception as exc:
             print("关闭外部App失败", package, exc)
 

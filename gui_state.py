@@ -19,6 +19,7 @@ DEFAULT_CONTROL = {
     "exclude_tags": ["下单", "快手", "评价", "助力"],
     "coin_exclude_tags": ["下单", "快手", "评价", "助力"],
     "energy_exclude_tags": ["下单", "快手", "评价", "助力", "分享", "每拉"],
+    "android_user_id": "0",
 }
 
 DEFAULT_STATUS = {
@@ -32,6 +33,7 @@ DEFAULT_STATUS = {
     "exclude_tags": [],
     "coin_exclude_tags": [],
     "energy_exclude_tags": [],
+    "android_user_id": "0",
     "last_error": None,
     "updated_at": "",
 }

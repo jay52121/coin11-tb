@@ -92,13 +92,35 @@
       border-color: #0284c7;
       color: #075985;
     }
-    input {
+    input,
+    select {
       font-family: "Microsoft YaHei", sans-serif;
       min-height: 34px;
       padding: 0 10px;
       border: 1px solid #b8c2cc;
       border-radius: 4px;
       font-size: 14px;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .toolbar-spacer {
+      flex: 1;
+    }
+    .user-select {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #52616f;
+      font-size: 13px;
+      white-space: nowrap;
     }
     input.coin-input,
     .tag-editor.coin {
@@ -250,19 +272,30 @@
   <main>
     <h1>Android UI 自动化控制台</h1>
 
-    <section>
-      <button id="start_btn" class="success" onclick="post('/api/start')">启动</button>
-      <button id="stop_btn" class="danger" onclick="post('/api/stop')">停止</button>
-      <button id="pause_btn" class="warning" onclick="post('/api/pause')">暂停</button>
-      <button id="resume_btn" class="info" onclick="post('/api/resume')">继续</button>
-      <button id="energy_btn" class="energy" onclick="post('/api/start-energy')">做体力</button>
-      <button id="restart_service_btn" class="service" onclick="restartService()">启动/重启服务</button>
+    <section class="toolbar">
+      <div class="toolbar-actions">
+        <button id="start_btn" class="success" onclick="post('/api/start')">启动</button>
+        <button id="stop_btn" class="danger" onclick="post('/api/stop')">停止</button>
+        <button id="pause_btn" class="warning" onclick="post('/api/pause')">暂停</button>
+        <button id="resume_btn" class="info" onclick="post('/api/resume')">继续</button>
+        <button id="energy_btn" class="energy" onclick="post('/api/start-energy')">做体力</button>
+        <button id="restart_service_btn" class="service" onclick="restartService()">启动/重启服务</button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <label class="user-select">
+        淘宝用户
+        <select id="android_user_select" onchange="saveAndroidUser()">
+          <option value="0">主淘宝 user 0</option>
+          <option value="999">分身淘宝 user 999</option>
+        </select>
+      </label>
     </section>
 
     <section>
       <div class="grid">
         <div class="label">当前运行状态</div><div id="running">-</div>
         <div class="label">当前版本号</div><div id="version">-</div>
+        <div class="label">淘宝用户</div><div id="android_user_id">-</div>
         <div class="label">当前 Activity</div><div id="activity">-</div>
         <div class="label">当前页面类型</div><div id="page_type">-</div>
         <div class="label">当前操作</div><div id="action">-</div>
@@ -367,6 +400,16 @@
 
     async function post(url) {
       await fetch(url, { method: 'POST' });
+      await refresh();
+    }
+
+    async function saveAndroidUser() {
+      const select = document.getElementById('android_user_select');
+      await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ android_user_id: select.value })
+      });
       await refresh();
     }
 
@@ -654,6 +697,12 @@
       document.getElementById('energy_btn').disabled = status.running;
       document.getElementById('restart_service_btn').disabled = false;
       document.getElementById('version').textContent = text(status.version);
+      const androidUserId = String(status.android_user_id || '0');
+      document.getElementById('android_user_id').textContent = androidUserId === '999' ? '分身淘宝 user 999' : '主淘宝 user 0';
+      const userSelect = document.getElementById('android_user_select');
+      if (document.activeElement !== userSelect) {
+        userSelect.value = androidUserId;
+      }
       document.getElementById('activity').textContent = text(status.activity);
       document.getElementById('page_type').textContent = label(pageTypeLabels, status.page_type);
       document.getElementById('action').textContent = label(actionLabels, status.action);

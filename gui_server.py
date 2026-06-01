@@ -83,6 +83,7 @@ def start_task_process(source="api", mode="taojinbi"):
         exclude_tags=active_tags,
         coin_exclude_tags=control.get("coin_exclude_tags", []),
         energy_exclude_tags=control.get("energy_exclude_tags", []),
+        android_user_id=str(control.get("android_user_id", "0")),
         last_error=None,
     )
     task_name = "做体力任务" if mode == "energy" else "淘金币任务"
@@ -94,6 +95,7 @@ def start_task_process(source="api", mode="taojinbi"):
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
     env["TJB_TASK_MODE"] = mode
+    env["TJB_ANDROID_USER_ID"] = str(control.get("android_user_id", "0"))
     process = subprocess.Popen(
         [sys.executable, "-u", str(SCRIPT_PATH)],
         cwd=str(BASE_DIR),
@@ -228,6 +230,7 @@ def status():
     data["version"] = data.get("version") or read_script_version()
     data["coin_exclude_tags"] = control.get("coin_exclude_tags", [])
     data["energy_exclude_tags"] = control.get("energy_exclude_tags", [])
+    data["android_user_id"] = str(control.get("android_user_id", "0"))
     data["exclude_tags"] = data.get("exclude_tags") or control.get("coin_exclude_tags", []) or control.get("exclude_tags", [])
     return data
 
@@ -253,6 +256,20 @@ def clear_logs(mode: str = Query(default="detail")):
 @app.get("/api/control")
 def control():
     return read_control()
+
+
+@app.post("/api/control")
+def update_control(payload: dict):
+    updates = {}
+    if "android_user_id" in payload:
+        user_id = str(payload.get("android_user_id", "0")).strip() or "0"
+        if user_id not in {"0", "999"}:
+            return {"ok": False, "error": "android_user_id must be 0 or 999"}
+        updates["android_user_id"] = user_id
+    control = write_control(**updates)
+    update_status(android_user_id=str(control.get("android_user_id", "0")))
+    append_log(f"更新Android用户: {control.get('android_user_id', '0')}")
+    return {"ok": True, "android_user_id": str(control.get("android_user_id", "0"))}
 
 
 @app.post("/api/exclude-tags")
