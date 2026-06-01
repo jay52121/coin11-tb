@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0236"
+VERSION = "coin-row-xml-log-20260602-0250"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -900,9 +900,27 @@ def find_blocking_overlay(root, base_bounds):
         if bounds[2] - bounds[0] < 80 or bounds[3] - bounds[1] < 40:
             continue
         if node.attrib.get("clickable") == "true" and any(word in text for word in overlay_words):
-            print("疑似遮挡弹窗控件", text, bounds)
-            return {"text": text, "bounds": bounds}
+            context = blocking_overlay_context(root, bounds)
+            print("疑似遮挡弹窗控件", text, bounds, context)
+            return {"text": text, "bounds": bounds, "context": context}
     return None
+
+
+def blocking_overlay_context(root, marker_bounds):
+    if root is None or not marker_bounds:
+        return ""
+    marker_top = marker_bounds[1]
+    words = []
+    for node in root.iter("node"):
+        text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not text or not bounds:
+            continue
+        if bounds[1] > marker_top:
+            continue
+        if any(key in text for key in ["送你体力", "分享给好友", "去赚体力", "一键享受"]):
+            words.append(text)
+    return " / ".join(words[-4:])
 
 
 def looks_like_blocking_overlay(root, base_bounds):
@@ -919,7 +937,7 @@ def wait_while_jump_overlay_blocking(base_bounds):
         if not overlay:
             print("跳一跳疑似遮挡已消失，继续")
             return False
-        print("跳一跳疑似被遮挡，等待人工处理", overlay["text"], overlay["bounds"])
+        print("跳一跳疑似被遮挡，等待人工处理", overlay["text"], overlay["bounds"], overlay.get("context", ""))
         time.sleep(5)
 
 
