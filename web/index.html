@@ -405,11 +405,20 @@
 
     async function saveAndroidUser() {
       const select = document.getElementById('android_user_select');
-      await fetch('/api/control', {
+      const response = await fetch('/api/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ android_user_id: select.value })
       });
+      if (!response.ok) {
+        document.getElementById('last_error').textContent = '淘宝用户保存失败，请先重启GUI服务';
+        return;
+      }
+      const result = await response.json();
+      if (!result.ok) {
+        document.getElementById('last_error').textContent = result.error || '淘宝用户保存失败';
+        return;
+      }
       await refresh();
     }
 
