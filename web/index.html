@@ -256,7 +256,7 @@
       <button id="pause_btn" class="warning" onclick="post('/api/pause')">暂停</button>
       <button id="resume_btn" class="info" onclick="post('/api/resume')">继续</button>
       <button id="energy_btn" class="energy" onclick="post('/api/start-energy')">做体力</button>
-      <button id="restart_service_btn" class="service" onclick="restartService()">重启服务</button>
+      <button id="restart_service_btn" class="service" onclick="restartService()">启动/重启服务</button>
     </section>
 
     <section>
@@ -373,7 +373,13 @@
     async function restartService() {
       document.getElementById('restart_service_btn').disabled = true;
       sessionStorage.setItem('skip_auto_start_once', '1');
-      await fetch('/api/service/restart', { method: 'POST' });
+      try {
+        await fetch('/api/service/restart', { method: 'POST' });
+      } catch (err) {
+        document.getElementById('running').textContent = '服务未运行，请先双击淘金币启动.bat';
+        document.getElementById('restart_service_btn').disabled = false;
+        return;
+      }
       document.getElementById('running').textContent = '服务重启中';
       waitForServiceAndReload();
     }
@@ -396,6 +402,11 @@
     }
 
     async function autoStartOnLoad() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('no_auto_start') === '1') {
+        sessionStorage.removeItem('skip_auto_start_once');
+        return;
+      }
       if (sessionStorage.getItem('skip_auto_start_once') === '1') {
         sessionStorage.removeItem('skip_auto_start_once');
         return;
