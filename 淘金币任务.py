@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0006"
+VERSION = "coin-row-xml-log-20260602-0011"
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
 ACTION_CLASS = r"android.widget.Button|android.widget.TextView|android.view.View"
@@ -527,6 +527,44 @@ def good_shop_entry_has_reward_xml(root, action_bounds):
         if text == "+" or re.fullmatch(r"\+?\d+", text):
             return True
     return False
+
+
+def good_shop_claim_key_from_xml(root, action_bounds):
+    action_y = (action_bounds[1] + action_bounds[3]) // 2
+    row_items = []
+    for node in root.iter("node"):
+        text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not text or not bounds:
+            continue
+        y_center = (bounds[1] + bounds[3]) // 2
+        if abs(y_center - action_y) > 180 or bounds[0] >= action_bounds[0]:
+            continue
+        row_items.append((bounds[1], bounds[0], text))
+    blocked = ["O1CN", "JRU5", "淘金币", "立即领", "已领取", "right", "+", "KB/S"]
+    parts = []
+    for _, _, text in sorted(row_items):
+        item = text.strip()
+        if not item or any(word in item for word in blocked):
+            continue
+        if re.fullmatch(r"[￥\d.]+", item):
+            continue
+        parts.append(item)
+    return " ".join(parts[:3])[:80] or f"claim:{action_bounds}"
+
+
+def good_shop_claim_key_from_ocr(items, action_bounds):
+    row_text = ocr_row_text(items, action_bounds)
+    blocked = ["淘金币", "立即领", "已领取", "right", "+", "KB/S"]
+    parts = []
+    for item in row_text.split():
+        item = item.strip()
+        if not item or any(word in item for word in blocked):
+            continue
+        if re.fullmatch(r"[￥\d.]+", item):
+            continue
+        parts.append(item)
+    return " ".join(parts[:3])[:80] or f"ocr-claim:{action_bounds}"
 
 
 def good_shop_entry_sort_key(text, has_reward, bounds):
@@ -1450,14 +1488,15 @@ def click_good_shop_claim_once(claim_clicks, ocr_items=None):
         bounds = safe_obj_bounds(target, "立即领")
         if not bounds:
             return False
-        key = tuple(bounds)
+        root = dump_root()
+        key = good_shop_claim_key_from_xml(root, bounds) if root is not None else f"claim:{bounds}"
         if claim_clicks.get(key, 0) >= 2:
-            print("跳过重复立即领，已点击2次", bounds)
+            print("跳过重复立即领，已点击2次", key, bounds)
             return False
-        print("XML点击", "立即领", safe_obj_text(target, "立即领"), bounds)
+        print("XML点击", "立即领", safe_obj_text(target, "立即领"), bounds, key)
         human_click_bounds(bounds)
         claim_clicks[key] = claim_clicks.get(key, 0) + 1
-        print("记录立即领点击次数", bounds, claim_clicks[key])
+        print("记录立即领点击次数", key, claim_clicks[key])
         time.sleep(1.5)
         return True
     items = ocr_items if ocr_items is not None else scan_ocr_once("立即领")
@@ -1465,14 +1504,14 @@ def click_good_shop_claim_once(claim_clicks, ocr_items=None):
     print("OCR查找", "立即领", [(item["text"], item["bounds"]) for item in hits[:5]])
     for item in sorted(hits, key=lambda item: (item["bounds"][1], item["bounds"][0])):
         bounds = item["bounds"]
-        key = tuple(bounds)
+        key = good_shop_claim_key_from_ocr(items, bounds)
         if claim_clicks.get(key, 0) >= 2:
-            print("跳过重复立即领，已点击2次", bounds)
+            print("跳过重复立即领，已点击2次", key, bounds)
             continue
-        print("OCR点击", "立即领", bounds)
+        print("OCR点击", "立即领", bounds, key)
         human_click_bounds(bounds)
         claim_clicks[key] = claim_clicks.get(key, 0) + 1
-        print("记录立即领点击次数", bounds, claim_clicks[key])
+        print("记录立即领点击次数", key, claim_clicks[key])
         time.sleep(1.5)
         return True
     return False
