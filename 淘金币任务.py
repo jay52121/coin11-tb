@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0316"
+VERSION = "coin-row-xml-log-20260602-0326"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -404,6 +404,15 @@ def looks_like_coin_home_page(texts=None):
     return has_home and not has_task and not looks_like_search_browse_page(texts)
 
 
+def looks_like_taobao_home_page(texts=None):
+    if texts is None:
+        texts = get_page_texts()
+    has_top_channel = has_any(texts, ["推荐", "关注", "闪购", "国补", "穿搭", "飞猪", "618"])
+    has_search = has_any(texts, ["搜索栏", "扫一扫", "拍立淘", "搜索"])
+    has_home_grid = has_any(texts, ["淘宝农场", "天猫新品", "试用领取", "红包签到", "天猫超市"])
+    return has_search and (has_top_channel or has_home_grid)
+
+
 def looks_like_browse_task_page(texts=None, activity_name=""):
     if texts is None:
         texts = get_page_texts()
@@ -684,6 +693,10 @@ def classify_current_page():
         page_type = "coin_home"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
+    if looks_like_taobao_home_page(texts):
+        page_type = "taobao_home"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
     if looks_like_shop_subscribe_task(texts):
         page_type = "shop_subscribe_task"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
@@ -768,6 +781,20 @@ def stop_known_external_apps():
             stop_app_for_user(package)
         except Exception as exc:
             print("关闭外部App失败", package, exc)
+
+
+def click_taobao_home_coin_entry():
+    coin_entry = d(classNameMatches=ACTION_CLASS, textMatches="领淘金币")
+    if not coin_entry.exists(timeout=0.5):
+        print("已锁定淘宝首页，但未看到领淘金币入口")
+        return False
+    bounds = safe_obj_bounds(coin_entry, "领淘金币")
+    if not bounds:
+        return False
+    print("淘宝首页点击领淘金币入口", safe_obj_text(coin_entry, "领淘金币"), bounds)
+    human_click_bounds(bounds)
+    time.sleep(4)
+    return True
 
 
 def click_daily_version_if_exists():
@@ -991,6 +1018,11 @@ def wait_for_task_list_after_entry(max_wait=12):
         if page_type == "external_app":
             print("启动入口落到外部App，关闭外部App并重开淘金币入口", package_name)
             stop_known_external_apps()
+            open_coin_home_direct(stop=True)
+            continue
+        if page_type == "taobao_home":
+            if click_taobao_home_coin_entry():
+                continue
             open_coin_home_direct(stop=True)
             continue
         if click_daily_version_if_exists():
@@ -2065,6 +2097,13 @@ def main_loop():
             if page_type == "external_app":
                 do_one_external_swipe()
                 back_to_task()
+                continue
+            if page_type == "taobao_home":
+                if click_taobao_home_coin_entry():
+                    wait_for_task_list_after_entry(max_wait=15)
+                else:
+                    open_coin_home_direct(stop=True)
+                    wait_for_task_list_after_entry(max_wait=15)
                 continue
             if page_type == "coin_home":
                 if enter_task_list_from_coin_home():
