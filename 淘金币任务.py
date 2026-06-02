@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260602-0326"
+VERSION = "coin-row-xml-log-20260602-1455"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -870,6 +870,7 @@ def enter_task_list_from_coin_home():
 def enter_energy_task_list_from_coin_home(max_wait=8):
     print("查找赚体力入口，返回做任务赚体力列表")
     deadline = time.time() + max_wait
+    tried_daily_version = False
     while time.time() < deadline:
         wait_if_paused()
         if should_stop():
@@ -887,6 +888,12 @@ def enter_energy_task_list_from_coin_home(max_wait=8):
                 human_click_bounds(bounds)
                 time.sleep(2)
                 continue
+        if not tried_daily_version and d(classNameMatches=ACTION_CLASS, textMatches=rule_text("daily_version_words", "回日常版")).exists(timeout=0.2):
+            print("未看到赚体力入口，先点击回日常版再查找赚体力")
+            tried_daily_version = True
+            click_daily_version_if_exists()
+            time.sleep(1)
+            continue
         time.sleep(1)
     print("未找到赚体力入口，不能切到赚金币")
     return False
