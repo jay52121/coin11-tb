@@ -294,6 +294,7 @@
     <section>
       <div class="grid">
         <div class="label">当前运行状态</div><div id="running">-</div>
+        <div class="label">当前任务类型</div><div id="task_mode">-</div>
         <div class="label">当前版本号</div><div id="version">-</div>
         <div class="label">淘宝用户</div><div id="android_user_id">-</div>
         <div class="label">当前 Activity</div><div id="activity">-</div>
@@ -340,6 +341,12 @@
       running: '运行中',
       paused: '已暂停',
       stopped: '已停止'
+    };
+
+    const taskModeLabels = {
+      taojinbi: '淘金币任务',
+      energy: '做体力任务',
+      unknown: '未知'
     };
 
     const pageTypeLabels = {
@@ -719,6 +726,7 @@
       }
       const runningState = status.running ? (status.paused ? 'paused' : 'running') : 'stopped';
       document.getElementById('running').textContent = label(runningLabels, runningState);
+      document.getElementById('task_mode').textContent = label(taskModeLabels, status.task_mode);
       document.getElementById('start_btn').disabled = status.running;
       document.getElementById('stop_btn').disabled = !status.running;
       document.getElementById('pause_btn').disabled = !status.running || status.paused;

@@ -79,6 +79,7 @@ def start_task_process(source="api", mode="taojinbi"):
         running=True,
         paused=False,
         action="starting",
+        task_mode=mode,
         version=read_script_version(),
         exclude_tags=active_tags,
         coin_exclude_tags=control.get("coin_exclude_tags", []),
@@ -212,6 +213,7 @@ def status():
     control = read_control()
     data["running"] = process_running()
     data["version"] = data.get("version") or read_script_version()
+    data["task_mode"] = data.get("task_mode") or "unknown"
     data["coin_exclude_tags"] = control.get("coin_exclude_tags", [])
     data["energy_exclude_tags"] = control.get("energy_exclude_tags", [])
     data["android_user_id"] = str(control.get("android_user_id", "0"))

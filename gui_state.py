@@ -29,6 +29,7 @@ DEFAULT_STATUS = {
     "page_type": "unknown",
     "action": "idle",
     "current_task": "",
+    "task_mode": "unknown",
     "version": "",
     "exclude_tags": [],
     "coin_exclude_tags": [],
