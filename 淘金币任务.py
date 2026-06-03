@@ -14,7 +14,7 @@ from gui_state import append_key_log, read_control, read_rules, update_status as
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
 COIN_HOME_URL = "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
-VERSION = "coin-row-xml-log-20260603-0024"
+VERSION = "next-task-tab-20260603-0245"
 OCR_SCALE_FACTOR = 0.5
 RUN_MODE = os.environ.get("TJB_TASK_MODE", "taojinbi")
 ANDROID_USER_ID = os.environ.get("TJB_ANDROID_USER_ID", "0").strip() or "0"
@@ -61,12 +61,14 @@ ctx = d.watch_context()
 
 
 def watcher_click_log(name):
-    def action(selector):
+    def action(selector=None, el=None, **kwargs):
+        target = selector or el
         print("Watcher点击", name)
         try:
-            human_click_bounds(selector.bounds())
+            human_click_bounds(target.bounds())
         except Exception:
-            selector.click()
+            if target is not None:
+                target.click()
 
     return action
 
@@ -400,9 +402,17 @@ def looks_like_search_browse_page(texts):
 def looks_like_coin_home_page(texts=None):
     if texts is None:
         texts = get_page_texts()
+    if looks_like_coin_task_panel_texts(texts):
+        return False
     has_home = has_any(texts, rule_list("coin_home_words"))
     has_task = has_any(texts, rule_list("coin_home_task_words"))
     return has_home and not has_task and not looks_like_search_browse_page(texts)
+
+
+def looks_like_coin_task_panel_texts(texts=None):
+    if texts is None:
+        texts = get_page_texts()
+    return has_any(texts, ["赚金币抵钱", "今日累计奖励", "完成进度"]) and has_any(texts, ["领取奖励", "去完成", "去逛逛", "逛一逛"])
 
 
 def looks_like_taobao_home_page(texts=None):
@@ -484,6 +494,27 @@ def looks_like_good_shop_page(texts):
 
 def looks_like_energy_task_list(texts):
     return has_any(texts, ["做任务赚体力"]) and has_any(texts, ["赚体力", "体力"])
+
+
+def is_current_energy_task_panel():
+    root = dump_root()
+    if root is None:
+        return False
+    has_title = False
+    has_task_action = False
+    has_task_row = False
+    for node in root.iter("node"):
+        text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not text or not bounds:
+            continue
+        if "做任务赚体力" in text and bounds[1] < int(screen_height * 0.45):
+            has_title = True
+        if re.search(action_text_pattern(), text) and bounds[0] >= int(screen_width * 0.68):
+            has_task_action = True
+        if any(word in text for word in ["天猫积分换体力", "每300天猫积分兑换", "最高得", "体力("]):
+            has_task_row = True
+    return has_title and (has_task_action or has_task_row)
 
 
 def looks_like_good_shop_child_page(texts):
@@ -672,6 +703,10 @@ def classify_current_page():
         page_type = "good_shop_page"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
+    if looks_like_task_list_page(texts) or looks_like_coin_task_panel_texts(texts):
+        page_type = "daily_task_list"
+        set_page(page_type, activity=activity_name or "", running=True, paused=False)
+        return page_type, package_name, activity_name, texts
     if looks_like_coin_home_page(texts):
         page_type = "coin_home"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
@@ -690,10 +725,6 @@ def classify_current_page():
         return page_type, package_name, activity_name, texts
     if has_any(texts, rule_list("quiz_words", ["淘金币趣味答题", "我选好了"])):
         page_type = "quiz"
-        set_page(page_type, activity=activity_name or "", running=True, paused=False)
-        return page_type, package_name, activity_name, texts
-    if looks_like_task_list_page(texts):
-        page_type = "daily_task_list"
         set_page(page_type, activity=activity_name or "", running=True, paused=False)
         return page_type, package_name, activity_name, texts
     if has_task_done_text(texts):
@@ -860,12 +891,12 @@ def wait_and_click_earn_more_after_daily(max_wait=8):
 def enter_task_list_from_coin_home():
     global expanded_more_tasks
     expanded_more_tasks = False
-    if click_daily_version_if_exists():
-        return wait_and_click_earn_more_after_daily()
     if looks_like_task_list_page():
         return True
     if click_earn_more_if_exists():
         return True
+    if click_daily_version_if_exists():
+        return wait_and_click_earn_more_after_daily()
     print("未找到赚金币入口，不再盲点首页固定区域")
     return False
 
@@ -985,6 +1016,38 @@ def wait_while_jump_overlay_blocking(base_bounds):
         time.sleep(5)
 
 
+def wait_for_jump_overlay_after_action(base_bounds, max_wait=14):
+    print("跳一跳后观察遮挡弹窗", max_wait)
+    deadline = time.time() + max_wait
+    saw_overlay = False
+    while time.time() < deadline:
+        if should_stop():
+            return True
+        wait_if_paused()
+        root = dump_root()
+        overlay = find_blocking_overlay(root, base_bounds)
+        if overlay:
+            saw_overlay = True
+            text = overlay["text"]
+            print("跳一跳观察到遮挡弹窗", text, overlay["bounds"], overlay.get("context", ""))
+            if "关闭" in text:
+                print("点击跳一跳遮挡关闭按钮", overlay["bounds"])
+                human_click_bounds(overlay["bounds"])
+                time.sleep(1.2)
+                continue
+            time.sleep(1)
+            continue
+        if saw_overlay:
+            print("跳一跳遮挡弹窗已消失")
+            return False
+        time.sleep(1)
+    if saw_overlay:
+        print("跳一跳遮挡弹窗观察超时，继续交给后续页面判定")
+    else:
+        print("跳一跳后未观察到遮挡弹窗")
+    return False
+
+
 def run_jump_energy_if_visible():
     miss_count = 0
     did_run = False
@@ -1007,16 +1070,13 @@ def run_jump_energy_if_visible():
         print("发现跳一跳拿钱", text, bounds, "剩余体力", energy)
         if energy is not None and energy <= 50:
             print("跳一跳剩余体力不超过50，停止")
+            wait_for_jump_overlay_after_action(bounds)
             return did_run
         set_action("doing_jump_energy", current_task="跳一跳拿钱")
         human_long_press_bounds(bounds, hold=3.0, radius=10)
         did_run = True
-        time.sleep(5)
-        root = dump_root()
-        if find_blocking_overlay(root, bounds):
-            if wait_while_jump_overlay_blocking(bounds):
-                return did_run
-            continue
+        if wait_for_jump_overlay_after_action(bounds):
+            return did_run
         if energy is None:
             print("跳一跳未解析到剩余体力，只执行一次")
             return did_run
@@ -1180,19 +1240,66 @@ def click_search_discovery_if_exists():
     return False
 
 
+def click_next_task_tab_if_exists():
+    root = dump_root()
+    if root is None:
+        return False
+    candidates = []
+    for node in root.iter("node"):
+        text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+        if "下个任务" not in text:
+            continue
+        bounds = parse_bounds(node.attrib.get("bounds"))
+        if not bounds:
+            continue
+        if bounds[0] <= int(screen_width * 0.25):
+            candidates.append(bounds)
+    if not candidates:
+        return False
+    bounds = sorted(candidates, key=lambda item: (item[1], item[0]))[0]
+    y = (bounds[1] + bounds[3]) // 2
+    x = max(20, min(55, bounds[0] + 15))
+    print("点击左侧下个任务标签", bounds, "tap", x, y)
+    human_click(x, y)
+    time.sleep(2)
+    return True
+
+
 def browse_task_loop(duration=BROWSE_TASK_DURATION):
     set_action("doing_scroll_task")
     click_search_discovery_if_exists()
     start_time = time.time()
     last_ocr_check = 0
+    next_task_hops = 0
     ocr_done_event.clear()
     print("开始做任务。。。")
-    while time.time() - start_time < duration:
+    while True:
         if should_stop():
             return
         wait_if_paused()
+        if time.time() - start_time >= duration:
+            print("浏览计时结束")
+            if next_task_hops < 8 and click_next_task_tab_if_exists():
+                next_task_hops += 1
+                print("已通过下个任务标签进入下一任务", next_task_hops)
+                set_action("doing_scroll_task")
+                click_search_discovery_if_exists()
+                start_time = time.time()
+                last_ocr_check = 0
+                ocr_done_event.clear()
+                continue
+            break
         if ocr_done_event.is_set():
             print("OCR检测到任务已完成，提前返回")
+            if next_task_hops < 8 and click_next_task_tab_if_exists():
+                next_task_hops += 1
+                print("已通过下个任务标签进入下一任务", next_task_hops)
+                set_action("doing_scroll_task")
+                click_search_discovery_if_exists()
+                start_time = time.time()
+                last_ocr_check = 0
+                ocr_done_event.clear()
+                continue
             break
         start_x = random.randint(screen_width // 5, screen_width // 2)
         start_y = random.randint(int(screen_height * 0.62), int(screen_height * 0.86))
@@ -1391,6 +1498,51 @@ def find_task_action_button():
     return None, None
 
 
+def confirm_integral_exchange_popup(texts=None, task_context=False):
+    if texts is None:
+        texts = get_page_texts(120)
+    has_integral_context = has_any(texts, ["积分兑换体力", "需300天猫积分", "我的天猫积分"])
+    if not task_context and not (has_integral_context and has_any(texts, ["确认"])):
+        return False
+    print("检测到积分兑换体力确认弹窗，点击确认")
+    root = dump_root()
+    if root is not None:
+        confirm_bounds = []
+        xml_has_integral_context = False
+        for node in root.iter("node"):
+            text = (node.attrib.get("text") or node.attrib.get("content-desc") or "").strip()
+            bounds = parse_bounds(node.attrib.get("bounds"))
+            if any(word in text for word in ["积分兑换体力", "需300天猫积分", "我的天猫积分"]):
+                xml_has_integral_context = True
+            if text == "确认" and bounds and node.attrib.get("clickable") == "true":
+                confirm_bounds.append(bounds)
+        if confirm_bounds and (task_context or has_integral_context or xml_has_integral_context):
+            bounds = sorted(confirm_bounds, key=lambda item: (item[1], item[0]))[0]
+            print("点击积分兑换弹窗确认按钮", bounds)
+            human_click_bounds(bounds)
+            time.sleep(2)
+            return True
+    print("未找到积分兑换弹窗确认按钮")
+    return False
+
+
+def wait_confirm_integral_exchange_popup(task_name, max_wait=5):
+    if "天猫积分换体力" not in (task_name or ""):
+        return False
+    print("天猫积分换体力点击后等待确认弹窗")
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        wait_if_paused()
+        if should_stop():
+            return False
+        if confirm_integral_exchange_popup(task_context=True):
+            append_key_log(f"任务确认兑换: {task_name}")
+            return True
+        time.sleep(0.5)
+    print("天猫积分换体力确认弹窗等待超时")
+    return False
+
+
 def find_action_row_bounds(action_node, parent, action_bounds):
     target = parent.get(action_node)
     best_bounds = None
@@ -1527,6 +1679,101 @@ def find_ocr_task_action_buttons():
     action_items.sort(key=lambda value: (value[0], value[1]))
     print("OCR任务按钮候选", [(bounds, text, task_name) for _, _, bounds, text, task_name in action_items[:8]])
     return [(bounds, text, task_name) for _, _, bounds, text, task_name in action_items[:8]]
+
+
+def ocr_looks_like_coin_task_panel(items):
+    texts = [item.get("text") or "" for item in items]
+    return has_any(texts, ["赚金币抵钱"]) and has_any(texts, ["今日累计奖励", "完成进度"]) and has_any(texts, ["领取奖励", "去完成", "去逛逛", "逛一逛"])
+
+
+def find_ocr_task_action_buttons_with_items(items):
+    action_items = []
+    for item in items:
+        bounds = item["bounds"]
+        x_center = (bounds[0] + bounds[2]) // 2
+        if x_center < int(screen_width * 0.65):
+            continue
+        if not ocr_text_contains(item["text"], ocr_action_words()):
+            continue
+        task_name = ocr_row_text(items, bounds) or item["text"]
+        action_items.append((bounds[1], bounds[0], bounds, item["text"], task_name))
+    action_items.sort(key=lambda value: (value[0], value[1]))
+    return [(bounds, text, task_name) for _, _, bounds, text, task_name in action_items[:8]]
+
+
+def handle_ocr_task_buttons(label="OCR任务"):
+    started = time.perf_counter()
+    screenshot = d.screenshot(format="opencv")
+    screenshot_time = time.perf_counter() - started
+    items, timings = read_ocr_results(screenshot, scale_factor=OCR_SCALE_FACTOR, gpu=True, min_confidence=0.25)
+    timings["screenshot"] = screenshot_time
+    timings["total"] += screenshot_time
+    print(label, "OCR扫描", len(items), {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
+    candidates = find_ocr_task_action_buttons_with_items(items)
+    print(label, "OCR任务按钮候选", candidates)
+    for bounds, action_text, ocr_task_name in candidates:
+        if skip_task_name(ocr_task_name):
+            print("OCR跳过任务", action_text, ocr_task_name, bounds)
+            continue
+        if task_is_done_text(ocr_task_name):
+            print("OCR跳过已完成任务", action_text, ocr_task_name, bounds)
+            continue
+        clicked_key = task_click_key(ocr_task_name)
+        click_limit = task_click_limit(ocr_task_name)
+        if have_clicked.get(clicked_key, 0) >= click_limit:
+            print("OCR跳过已点击多次任务", action_text, ocr_task_name, clicked_key, have_clicked[clicked_key], "上限", click_limit)
+            continue
+        click_key = f"ocr:{clicked_key}:{bounds}"
+        if click_key in invalid_click_keys:
+            print("OCR跳过刚才点击无效任务", action_text, ocr_task_name, bounds)
+            continue
+        print("OCR点击右侧任务按钮", action_text, ocr_task_name, bounds)
+        set_action("clicking_task", current_task=ocr_task_name)
+        have_clicked[clicked_key] = have_clicked.get(clicked_key, 0) + 1
+        print("记录任务点击次数", clicked_key, have_clicked[clicked_key])
+        human_click_bounds(bounds)
+        handle_after_task_click(ocr_task_name, click_key)
+        return True
+    return False
+
+
+def handle_ocr_coin_task_panel_if_visible():
+    started = time.perf_counter()
+    screenshot = d.screenshot(format="opencv")
+    screenshot_time = time.perf_counter() - started
+    items, timings = read_ocr_results(screenshot, scale_factor=OCR_SCALE_FACTOR, gpu=True, min_confidence=0.25)
+    timings["screenshot"] = screenshot_time
+    timings["total"] += screenshot_time
+    print("OCR金币面板识别", len(items), {k: round(v, 3) if isinstance(v, float) else v for k, v in timings.items()})
+    if not ocr_looks_like_coin_task_panel(items):
+        return False
+    print("OCR确认赚金币抵钱任务面板")
+    candidates = find_ocr_task_action_buttons_with_items(items)
+    print("OCR金币面板任务按钮候选", candidates)
+    for bounds, action_text, ocr_task_name in candidates:
+        if skip_task_name(ocr_task_name) or task_is_done_text(ocr_task_name):
+            print("OCR金币面板跳过任务", action_text, ocr_task_name, bounds)
+            continue
+        clicked_key = task_click_key(ocr_task_name)
+        if have_clicked.get(clicked_key, 0) >= task_click_limit(ocr_task_name):
+            print("OCR金币面板跳过已点击多次任务", ocr_task_name, clicked_key, have_clicked[clicked_key])
+            continue
+        click_key = f"ocr-panel:{clicked_key}:{bounds}"
+        if click_key in invalid_click_keys:
+            print("OCR金币面板跳过刚才点击无效任务", ocr_task_name, bounds)
+            continue
+        print("OCR金币面板点击任务按钮", action_text, ocr_task_name, bounds)
+        set_action("clicking_task", current_task=ocr_task_name)
+        have_clicked[clicked_key] = have_clicked.get(clicked_key, 0) + 1
+        print("记录任务点击次数", clicked_key, have_clicked[clicked_key])
+        human_click_bounds(bounds)
+        handle_after_task_click(ocr_task_name, click_key)
+        return True
+    if ocr_task_list_is_at_bottom():
+        print("OCR金币面板到底且无可点任务")
+        return False
+    scroll_task_list_once()
+    return True
 
 
 def ocr_task_list_is_at_bottom():
@@ -1754,8 +2001,17 @@ def handle_after_task_click(task_name, click_key=None):
     if task_is_good_shop_task(task_name) and looks_like_good_shop_page(texts):
         handle_good_shop_task()
         return
+    if RUN_MODE == "energy" and wait_confirm_integral_exchange_popup(task_name):
+        return
     if page_type in ["daily_task_list", "energy_task_list"]:
-        print("点击后仍在任务列表，记录无效点击并继续")
+        if RUN_MODE == "energy" and page_type == "daily_task_list":
+            print("点击后落到日常任务列表，记录无效点击并交给体力循环恢复")
+        elif RUN_MODE == "energy" and confirm_integral_exchange_popup(texts):
+            print("点击后出现积分兑换弹窗，已确认兑换")
+            append_key_log(f"任务确认兑换: {task_name}")
+            return
+        else:
+            print("点击后仍在任务列表，记录无效点击并继续")
         append_key_log(f"任务未进入: {task_name}")
         if click_key:
             invalid_click_keys.add(click_key)
@@ -1984,6 +2240,24 @@ def ensure_energy_task_list_at_start():
     return False
 
 
+def recover_energy_task_list_from_daily_list():
+    print("做体力模式误入日常任务列表，尝试恢复赚体力列表")
+    append_key_log("做体力误入日常任务列表，恢复赚体力")
+    human_back()
+    time.sleep(1)
+    page_type, package_name, activity_name, texts = classify_current_page()
+    print("日常任务列表返回后页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
+    if page_type == "energy_task_list":
+        return True
+    if page_type == "coin_home":
+        run_jump_energy_if_visible()
+        if enter_energy_task_list_from_coin_home(max_wait=8):
+            return True
+    print("返回后仍未到赚体力入口，重开淘金币入口恢复体力列表")
+    open_coin_home_direct(stop=True)
+    return ensure_energy_task_list_at_start()
+
+
 def energy_task_loop():
     global finish_count
     no_task_scroll_count = 0
@@ -2000,8 +2274,14 @@ def energy_task_loop():
             time.sleep(1)
             page_type, package_name, activity_name, texts = classify_current_page()
             print("做体力操作前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:10]})
+            if page_type == "energy_task_list" and not is_current_energy_task_panel():
+                print("体力任务列表判定未通过XML二次校验，按淘金币首页恢复")
+                page_type = "coin_home"
             if page_type == "energy_task_list":
                 check_verify(d)
+                if confirm_integral_exchange_popup(texts):
+                    no_task_scroll_count = 0
+                    continue
                 set_action("finding_task")
                 action_view, task_name = find_task_action_button()
                 if action_view:
@@ -2017,7 +2297,7 @@ def energy_task_loop():
                     continue
                 no_task_scroll_count += 1
                 print("做体力未找到可点击按钮，继续下翻", no_task_scroll_count)
-                if energy_task_list_is_at_bottom(texts):
+                if energy_task_list_is_at_bottom(texts) or (no_task_scroll_count >= 2 and ocr_task_list_is_at_bottom()):
                     print("做体力任务列表已到底部且本页无可点击任务，认为体力任务已全部完成")
                     append_key_log("做体力任务已完成，切换淘金币任务")
                     have_clicked.clear()
@@ -2031,6 +2311,13 @@ def energy_task_loop():
                 have_clicked.clear()
                 invalid_click_keys.clear()
                 return True
+            if page_type == "daily_task_list":
+                coin_home_fail_count = 0
+                if recover_energy_task_list_from_daily_list():
+                    no_task_scroll_count = 0
+                    continue
+                print("做体力模式从日常任务列表恢复失败，继续查找而不直接结束")
+                continue
             if page_type in ["quiz", "shop_subscribe_task", "task_done", "taobao_browse_task", "external_app", "coin_home", "unknown_taobao_page"]:
                 if page_type == "coin_home":
                     run_jump_energy_if_visible()
@@ -2092,8 +2379,6 @@ def main_loop():
             time.sleep(1)
             page_type, package_name, activity_name, texts = classify_current_page()
             print("操作前页面判定", {"page": page_type, "package": package_name, "activity": activity_name, "texts": texts[:8]})
-            if run_jump_energy_if_visible():
-                continue
             if page_type == "good_shop_page":
                 handle_good_shop_task()
                 continue
@@ -2124,6 +2409,8 @@ def main_loop():
             if page_type == "coin_home":
                 if enter_task_list_from_coin_home():
                     coin_home_fail_count = 0
+                elif handle_ocr_coin_task_panel_if_visible():
+                    coin_home_fail_count = 0
                 else:
                     coin_home_fail_count += 1
                     print("淘金币首页连续未找到任务入口", coin_home_fail_count)
@@ -2142,10 +2429,6 @@ def main_loop():
             coin_home_fail_count = 0
             check_verify(d)
             set_action("finding_task")
-            if click_daily_version_if_exists():
-                wait_and_click_earn_more_after_daily()
-                no_task_scroll_count = 0
-                continue
 
             action_view, task_name = find_task_action_button()
             if action_view:

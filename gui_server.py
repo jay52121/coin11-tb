@@ -212,12 +212,15 @@ def status():
     data = read_status()
     control = read_control()
     data["running"] = process_running()
-    data["version"] = data.get("version") or read_script_version()
+    script_version = read_script_version()
+    data["version"] = script_version
     data["task_mode"] = data.get("task_mode") or "unknown"
     data["coin_exclude_tags"] = control.get("coin_exclude_tags", [])
     data["energy_exclude_tags"] = control.get("energy_exclude_tags", [])
     data["android_user_id"] = str(control.get("android_user_id", "0"))
     data["exclude_tags"] = data.get("exclude_tags") or control.get("coin_exclude_tags", []) or control.get("exclude_tags", [])
+    if script_version:
+        update_status(version=script_version)
     return data
 
 

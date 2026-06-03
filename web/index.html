@@ -436,16 +436,26 @@
       try {
         await fetch('/api/service/restart', { method: 'POST' });
       } catch (err) {
-        document.getElementById('running').textContent = '服务未运行，请先双击淘金币启动.bat';
-        document.getElementById('restart_service_btn').disabled = false;
+        document.getElementById('running').textContent = '服务未运行，正在请求本地启动器';
+        requestLocalServiceStart();
+        waitForServiceAndReload();
         return;
       }
       document.getElementById('running').textContent = '服务重启中';
       waitForServiceAndReload();
     }
 
+    function requestLocalServiceStart() {
+      try {
+        window.location.href = 'tjb-gui://start';
+      } catch (err) {
+        document.getElementById('last_error').textContent = '无法调用一键启动协议，请双击安装一键启动协议.bat';
+      }
+    }
+
     async function waitForServiceAndReload() {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 30000;
+      let launcherRequested = false;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         try {
@@ -457,8 +467,14 @@
         } catch (err) {
           // Service is expected to be briefly unavailable during restart.
         }
+        if (!launcherRequested && Date.now() > deadline - 23000) {
+          launcherRequested = true;
+          document.getElementById('running').textContent = '服务未恢复，正在请求本地启动器';
+          requestLocalServiceStart();
+        }
       }
-      document.getElementById('running').textContent = '服务重启中，请手动刷新';
+      document.getElementById('running').textContent = '仍未检测到服务，请双击淘金币启动.bat 或重新安装一键启动协议';
+      document.getElementById('restart_service_btn').disabled = false;
     }
 
     async function autoStartOnLoad() {
