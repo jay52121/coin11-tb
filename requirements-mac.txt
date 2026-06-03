@@ -1,0 +1,10 @@
+uiautomator2==3.5.0
+uiautodev==0.14.0
+opencv-python==4.13.0.92
+easyocr==1.7.2
+ddddocr==1.5.6
+pytesseract==0.3.13
+fastapi
+uvicorn
+torch
+torchvision

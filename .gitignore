@@ -167,8 +167,11 @@ logs/*.log
 runtime/*.log
 *.xml
 current_*.png
+debug_*.png
+ocr_*.png
 after_run_ui.xml
 debug_no_earn.xml
 home_ui.xml
 task_ui.xml
+widget_*.txt
 .venv_cpu_backup/
