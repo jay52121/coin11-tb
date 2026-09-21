@@ -181,3 +181,4 @@ home_ui.xml
 task_ui.xml
 widget_*.txt
 .venv_cpu_backup/
+runtime/golden-captures/
