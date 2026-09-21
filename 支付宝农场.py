@@ -161,8 +161,6 @@ while True:
         continue
 d.watcher.remove()
 print(f"共自动化完成{finish_count}个任务")
-d.shell("settings put system accelerometer_rotation 0")
-print("关闭手机自动旋转")
 time2 = time.time()
 minutes, seconds = divmod(int(time2 - time1), 60)  # 同时计算分钟和秒
 print(f"共耗时: {minutes} 分钟 {seconds} 秒")

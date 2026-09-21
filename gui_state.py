@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -9,9 +10,12 @@ RUNTIME_DIR = BASE_DIR / "runtime"
 LOG_DIR = BASE_DIR / "logs"
 CONTROL_PATH = RUNTIME_DIR / "control.json"
 STATUS_PATH = RUNTIME_DIR / "status.json"
-RULES_PATH = RUNTIME_DIR / "rules.json"
+LOCAL_RULES_PATH = RUNTIME_DIR / "rules.json"
+DEFAULT_SHARED_RULES_PATH = BASE_DIR.parent / "shared" / "rules.json"
+RULES_PATH = Path(os.environ.get("TJB_RULES_PATH", DEFAULT_SHARED_RULES_PATH if DEFAULT_SHARED_RULES_PATH.exists() else LOCAL_RULES_PATH))
 RUN_LOG_PATH = LOG_DIR / "run.log"
 KEY_LOG_PATH = LOG_DIR / "key.log"
+COIN_RECORD_PATH = RUNTIME_DIR / "淘金币记录.json"
 
 DEFAULT_CONTROL = {
     "stop": False,
@@ -20,6 +24,9 @@ DEFAULT_CONTROL = {
     "coin_exclude_tags": ["下单", "快手", "评价", "助力"],
     "energy_exclude_tags": ["下单", "快手", "评价", "助力", "分享", "每拉"],
     "android_user_id": "0",
+    "run_all_users": False,
+    "allow_daily_version_fallback": False,
+    "enable_jump_energy": True,
 }
 
 DEFAULT_STATUS = {
@@ -35,11 +42,22 @@ DEFAULT_STATUS = {
     "coin_exclude_tags": [],
     "energy_exclude_tags": [],
     "android_user_id": "0",
+    "run_all_users": False,
+    "allow_daily_version_fallback": False,
+    "enable_jump_energy": True,
+    "taojinbi_coin": None,
+    "taojinbi_coin_record": None,
     "last_error": None,
     "updated_at": "",
 }
 
 DEFAULT_RULES = {
+    "app_version": "mac-refactor-20260605-033156",
+    "exclude_tags": ["下单", "快手", "评价", "助力"],
+    "coin_exclude_tags": ["下单", "快手", "评价", "助力"],
+    "energy_exclude_tags": ["下单", "快手", "评价", "助力", "分享", "每拉"],
+    "allow_daily_version_fallback": False,
+    "enable_jump_energy": True,
     "action_text_pattern": "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐|去兑换",
     "skip_task_extra_words": [
         "拉好友", "抢红包", "搜索兴趣商品下单", "买精选商品", "全场3元3件", "固定入口",
@@ -67,7 +85,7 @@ DEFAULT_RULES = {
         "去逛逛", "点击去逛",
     ],
     "task_list_bottom_words": ["收起更多任务"],
-    "task_done_page_words": ["任务已完成", "已得"],
+    "task_done_page_words": ["任务已完成", "已得", "已成功领取奖励", "回到主页"],
     "task_done_exclude_words": ["累计已得", "累积已得"],
     "quiz_words": ["淘金币趣味答题", "我选好了"],
     "shop_subscribe_words": ["订阅+", "已关注", "取消关注", "最多还可以领", "立即领"],
@@ -83,6 +101,7 @@ DEFAULT_RULES = {
     "earn_more_words": ["赚更多金币"],
     "earn_words": ["赚金币"],
     "expand_words": ["展开"],
+    "next_task_words": ["下个任务", "下一任务"],
     "reward_button_pattern": "领取奖励|立即领取|点击得",
     "ocr_done_text": "任务已完成",
     "ocr_done_extra_words": ["继续逛逛吧"],
@@ -100,7 +119,8 @@ def now_text():
 
 def atomic_write_json(path, data):
     ensure_dirs()
-    tmp_path = path.with_name(f"{path.name}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp")
     with tmp_path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
@@ -135,8 +155,72 @@ def read_status():
     return read_json(STATUS_PATH, DEFAULT_STATUS)
 
 
+def read_coin_records():
+    return read_json(COIN_RECORD_PATH, {"users": {}})
+
+
+def record_taojinbi_coin(user_id, coin, source="ocr"):
+    try:
+        coin = int(coin)
+    except (TypeError, ValueError):
+        return None
+    if coin <= 0:
+        return None
+
+    data = read_coin_records()
+    users = data.setdefault("users", {})
+    user_key = str(user_id or "0")
+    days = users.setdefault(user_key, {})
+    today = time.strftime("%Y-%m-%d")
+    now = now_text()
+    record = days.get(today)
+    if not isinstance(record, dict):
+        record = {
+            "date": today,
+            "first": coin,
+            "min": coin,
+            "max": coin,
+            "last": coin,
+            "first_seen": now,
+            "last_seen": now,
+            "count": 1,
+            "source": source,
+        }
+    else:
+        record["min"] = min(int(record.get("min", coin)), coin)
+        record["max"] = max(int(record.get("max", coin)), coin)
+        record["last"] = coin
+        record["last_seen"] = now
+        record["count"] = int(record.get("count", 0)) + 1
+        record["source"] = source
+        record.setdefault("first", coin)
+        record.setdefault("first_seen", now)
+    if source == "final":
+        record["final"] = coin
+        record["final_seen"] = now
+    days[today] = record
+    atomic_write_json(COIN_RECORD_PATH, data)
+    return record
+
+
 def read_rules():
-    return read_json(RULES_PATH, DEFAULT_RULES)
+    rules = read_json(RULES_PATH, DEFAULT_RULES)
+    legacy_control = read_json(CONTROL_PATH, DEFAULT_CONTROL)
+    try:
+        with RULES_PATH.open("r", encoding="utf-8") as f:
+            raw_rules = json.load(f)
+        if not isinstance(raw_rules, dict):
+            raw_rules = {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        raw_rules = {}
+    migrated = False
+    for key in ("exclude_tags", "coin_exclude_tags", "energy_exclude_tags", "allow_daily_version_fallback", "enable_jump_energy"):
+        if key not in raw_rules and key in legacy_control:
+            rules[key] = legacy_control[key]
+            migrated = True
+    if migrated:
+        atomic_write_json(RULES_PATH, rules)
+    return rules
 
 
 def write_rules(data):
@@ -171,6 +255,10 @@ def append_log(message):
     ensure_dirs()
     with RUN_LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(f"{now_text()} {message}\n")
+
+
+def append_action_log(message):
+    append_log(f"[页面操作] {message}")
 
 
 def append_key_log(message):

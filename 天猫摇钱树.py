@@ -113,5 +113,3 @@ while True:
     if not has_task:
         break
 ctx.close()
-d.shell("settings put system accelerometer_rotation 0")
-print("关闭手机自动旋转")

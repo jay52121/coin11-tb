@@ -58,7 +58,8 @@
 <body>
   <main>
     <h1>启动淘金币控制台</h1>
-    <p>第一次使用前，先双击同目录下的 <code>安装一键启动协议.bat</code>。以后可以把这个 HTML 保存为浏览器书签。</p>
+    <p>第一次使用前，Windows 双击同目录下的 <code>安装一键启动协议.bat</code>；Mac 双击 <code>安装一键启动协议.command</code>。以后可以把这个 HTML 保存为浏览器书签。</p>
+    <p>Mac 会打开可见服务窗口；需要停止服务时，在该窗口按 <code>Ctrl+C</code>。不要使用后台启动脚本作为日常入口。</p>
     <p>
       <button onclick="startService()">一键启动服务</button>
       <a class="button secondary" href="http://127.0.0.1:8765/?no_auto_start=1" target="_blank">打开控制台</a>
@@ -85,7 +86,7 @@
     }
 
     function startService() {
-      document.getElementById('status').textContent = '正在请求 Windows 启动本地服务...';
+      document.getElementById('status').textContent = '正在请求本机启动本地服务...';
       window.location.href = 'tjb-gui://start';
       waitForService();
     }

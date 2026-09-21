@@ -5,19 +5,22 @@ import io
 import re
 import cv2
 import numpy as np
-import ddddocr
 import subprocess
 import ssl
 import urllib.request
 import traceback
-import torch
 import uiautomator2 as u2
-print("PyTorch 版本:", torch.__version__)
-print("CUDA 是否可用:", torch.cuda.is_available())
-if hasattr(torch.backends, "mps"):
-    print("MPS 是否可用:", torch.backends.mps.is_available())
+try:
+    import torch
+except ImportError:
+    torch = None
 else:
-    print("MPS 不受支持")
+    print("PyTorch 版本:", torch.__version__)
+    print("CUDA 是否可用:", torch.cuda.is_available())
+    if hasattr(torch.backends, "mps"):
+        print("MPS 是否可用:", torch.backends.mps.is_available())
+    else:
+        print("MPS 不受支持")
 
 # 正确的SSL禁用方式：赋值为「调用后的上下文对象」，而非函数本身
 original_context = ssl._create_default_https_context
@@ -82,7 +85,7 @@ def tmall_no_click(text):
 
 def get_current_app(d):
     info = d.shell("dumpsys window | grep mCurrentFocus").output
-    match = re.search(r'mCurrentFocus=Window\{.*? u0 (.*?)/(.*?)\}', info)
+    match = re.search(r'mCurrentFocus=Window\{.*? u\d+ ([^/\s]+)/([^\s}]+)', info)
     if match:
         package_name = match.group(1)
         activity_name = match.group(2)
@@ -184,6 +187,8 @@ def find_button_multiscale(screen_shot, template_path, scales=np.linspace(0.6, 1
 
 
 def find_text_position(image, text):
+    import ddddocr
+
     ocr = ddddocr.DdddOcr(show_ad=False)
     ocr_result = ocr.classification(image)
     # 将 OCR 结果按行解析

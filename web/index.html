@@ -248,6 +248,90 @@
     .label {
       color: #52616f;
     }
+    .warn-inline {
+      color: #b45309;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .coin-chart-head {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .coin-chart-head h2 {
+      margin: 0;
+    }
+    .coin-chart-summary {
+      color: #52616f;
+      font-size: 13px;
+    }
+    .coin-chart-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 12px;
+    }
+    .coin-stat {
+      min-width: 112px;
+      padding: 8px 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      background: #f8fafc;
+    }
+    .coin-stat-label {
+      color: #64748b;
+      font-size: 12px;
+    }
+    .coin-stat-value {
+      margin-top: 2px;
+      color: #0f172a;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .coin-chart-wrap {
+      position: relative;
+      width: 100%;
+      height: 320px;
+      border: 1px solid #d8dee6;
+      border-radius: 4px;
+      background: #f8fafc;
+    }
+    .coin-chart-tooltip {
+      position: absolute;
+      display: none;
+      min-width: 150px;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.14);
+      color: #0f172a;
+      font-size: 12px;
+      line-height: 1.5;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .coin-record-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+      color: #334155;
+      font-size: 13px;
+    }
+    .coin-record-list div {
+      padding: 7px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      background: #fff;
+    }
+    #coin_chart {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
     #logs {
       margin: 0;
       max-height: 420px;
@@ -266,6 +350,17 @@
       word-break: break-word;
       user-select: text;
     }
+    .log-line.page-action {
+      margin: 2px 0;
+      padding: 3px 6px;
+      border-left: 3px solid #38bdf8;
+      background: rgba(37, 99, 235, 0.34);
+      color: #eff6ff;
+    }
+    .log-task-name {
+      color: #fde68a;
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -274,11 +369,11 @@
 
     <section class="toolbar">
       <div class="toolbar-actions">
-        <button id="start_btn" class="success" onclick="post('/api/start')">启动</button>
+        <button id="start_btn" class="success" onclick="startTask('taojinbi')">启动</button>
         <button id="stop_btn" class="danger" onclick="post('/api/stop')">停止</button>
         <button id="pause_btn" class="warning" onclick="post('/api/pause')">暂停</button>
         <button id="resume_btn" class="info" onclick="post('/api/resume')">继续</button>
-        <button id="energy_btn" class="energy" onclick="post('/api/start-energy')">做体力</button>
+        <button id="energy_btn" class="energy" onclick="startTask('energy')">做体力</button>
         <button id="restart_service_btn" class="service" onclick="restartService()">启动/重启服务</button>
       </div>
       <div class="toolbar-spacer"></div>
@@ -289,14 +384,29 @@
           <option value="999">分身淘宝 user 999</option>
         </select>
       </label>
+      <label class="user-select">
+        <input id="daily_fallback_toggle" type="checkbox" onchange="saveDailyFallback()">
+        回日常版兜底
+      </label>
+      <label class="user-select">
+        <input id="jump_energy_toggle" type="checkbox" onchange="saveJumpEnergy()">
+        跳一跳
+      </label>
+      <label class="user-select">
+        <input id="run_all_users_toggle" type="checkbox" onchange="saveRunAllUsers()">
+        连续运行后续用户
+      </label>
     </section>
 
     <section>
       <div class="grid">
         <div class="label">当前运行状态</div><div id="running">-</div>
         <div class="label">当前任务类型</div><div id="task_mode">-</div>
-        <div class="label">当前版本号</div><div id="version">-</div>
+        <div class="label">当前版本号</div><div><span id="version">-</span> <span id="restart_hint" class="warn-inline"></span></div>
         <div class="label">淘宝用户</div><div id="android_user_id">-</div>
+        <div class="label">当前淘金币</div><div id="taojinbi_coin">-</div>
+        <div class="label">回日常版兜底</div><div id="daily_fallback">-</div>
+        <div class="label">跳一跳</div><div id="jump_energy">-</div>
         <div class="label">当前 Activity</div><div id="activity">-</div>
         <div class="label">当前页面类型</div><div id="page_type">-</div>
         <div class="label">当前操作</div><div id="action">-</div>
@@ -305,6 +415,19 @@
         <div class="label">最后错误</div><div id="last_error">-</div>
         <div class="label">更新时间</div><div id="updated_at">-</div>
       </div>
+    </section>
+
+    <section>
+      <div class="coin-chart-head">
+        <h2>淘金币记录</h2>
+        <div id="coin_chart_summary" class="coin-chart-summary">-</div>
+      </div>
+      <div id="coin_chart_stats" class="coin-chart-stats"></div>
+      <div class="coin-chart-wrap">
+        <canvas id="coin_chart"></canvas>
+        <div id="coin_chart_tooltip" class="coin-chart-tooltip"></div>
+      </div>
+      <div id="coin_record_list" class="coin-record-list"></div>
     </section>
 
     <section>
@@ -411,6 +534,17 @@
       await refresh();
     }
 
+    async function startTask(mode) {
+      const userId = document.getElementById('android_user_select').value;
+      const runAll = document.getElementById('run_all_users_toggle').checked;
+      const path = mode === 'energy' ? '/api/start-energy' : '/api/start';
+      const params = new URLSearchParams({
+        android_user_id: userId,
+        run_all_users: String(runAll)
+      });
+      await post(`${path}?${params}`);
+    }
+
     async function saveAndroidUser() {
       const select = document.getElementById('android_user_select');
       const response = await fetch('/api/control', {
@@ -430,14 +564,66 @@
       await refresh();
     }
 
+    async function saveRunAllUsers() {
+      const toggle = document.getElementById('run_all_users_toggle');
+      const response = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_all_users: toggle.checked })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        document.getElementById('last_error').textContent = result.error || '连续运行设置保存失败';
+        return;
+      }
+      await refresh();
+    }
+
+    async function saveDailyFallback() {
+      const toggle = document.getElementById('daily_fallback_toggle');
+      const response = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allow_daily_version_fallback: toggle.checked })
+      });
+      if (!response.ok) {
+        document.getElementById('last_error').textContent = '回日常版兜底保存失败，请先重启GUI服务';
+        return;
+      }
+      const result = await response.json();
+      if (!result.ok) {
+        document.getElementById('last_error').textContent = result.error || '回日常版兜底保存失败';
+        return;
+      }
+      await refresh();
+    }
+
+    async function saveJumpEnergy() {
+      const toggle = document.getElementById('jump_energy_toggle');
+      const response = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable_jump_energy: toggle.checked })
+      });
+      if (!response.ok) {
+        document.getElementById('last_error').textContent = '跳一跳开关保存失败，请先重启GUI服务';
+        return;
+      }
+      const result = await response.json();
+      if (!result.ok) {
+        document.getElementById('last_error').textContent = result.error || '跳一跳开关保存失败';
+        return;
+      }
+      await refresh();
+    }
+
     async function restartService() {
       document.getElementById('restart_service_btn').disabled = true;
       sessionStorage.setItem('skip_auto_start_once', '1');
       try {
         await fetch('/api/service/restart', { method: 'POST' });
       } catch (err) {
-        document.getElementById('running').textContent = '服务未运行，正在请求本地启动器';
-        requestLocalServiceStart();
+        document.getElementById('running').textContent = '服务未运行，请在淘宝任务启动器中启动';
         waitForServiceAndReload();
         return;
       }
@@ -445,17 +631,8 @@
       waitForServiceAndReload();
     }
 
-    function requestLocalServiceStart() {
-      try {
-        window.location.href = 'tjb-gui://start';
-      } catch (err) {
-        document.getElementById('last_error').textContent = '无法调用一键启动协议，请双击安装一键启动协议.bat';
-      }
-    }
-
     async function waitForServiceAndReload() {
       const deadline = Date.now() + 30000;
-      let launcherRequested = false;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         try {
@@ -467,13 +644,11 @@
         } catch (err) {
           // Service is expected to be briefly unavailable during restart.
         }
-        if (!launcherRequested && Date.now() > deadline - 23000) {
-          launcherRequested = true;
-          document.getElementById('running').textContent = '服务未恢复，正在请求本地启动器';
-          requestLocalServiceStart();
+        if (Date.now() > deadline - 23000) {
+          document.getElementById('running').textContent = '等待淘宝任务启动器重新拉起服务';
         }
       }
-      document.getElementById('running').textContent = '仍未检测到服务，请双击淘金币启动.bat 或重新安装一键启动协议';
+      document.getElementById('running').textContent = '仍未检测到服务，请在淘宝任务启动器中点启动';
       document.getElementById('restart_service_btn').disabled = false;
     }
 
@@ -683,6 +858,11 @@
       return map[value] || text(value);
     }
 
+    function isPageActionLogLine(line) {
+      const source = String(line || '');
+      return source.includes('[页面操作]');
+    }
+
     let lastLogText = '';
     let logMode = 'detail';
     let selectingLogs = false;
@@ -729,6 +909,336 @@
       return selectingLogs || (selection && !selection.isCollapsed && logsElement.contains(selection.anchorNode));
     }
 
+    let lastCoinRecordKey = '';
+
+    function parseRecordDate(dateText) {
+      const parts = String(dateText || '').split('-').map(Number);
+      if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return null;
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+
+    function formatRecordDate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function recentYearDates(recordDates = []) {
+      const dates = [];
+      const parsedDates = recordDates.map(parseRecordDate).filter(Boolean);
+      const latestRecordDate = parsedDates.length ? new Date(Math.max(...parsedDates.map(date => date.getTime()))) : null;
+      const now = new Date();
+      const end = latestRecordDate && latestRecordDate > now ? latestRecordDate : now;
+      const start = new Date(end);
+      start.setDate(start.getDate() - 364);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        dates.push(formatRecordDate(d));
+      }
+      return dates;
+    }
+
+    function daysBetween(a, b) {
+      const ms = parseRecordDate(b).getTime() - parseRecordDate(a).getTime();
+      return Math.max(0, Math.round(ms / 86400000));
+    }
+
+    function addDays(dateText, offset) {
+      const date = parseRecordDate(dateText);
+      date.setDate(date.getDate() + offset);
+      return formatRecordDate(date);
+    }
+
+    function chooseTimeTicks(startDate, endDate, width) {
+      const totalDays = Math.max(1, daysBetween(startDate, endDate));
+      const maxTicks = Math.max(3, Math.min(8, Math.floor(width / 110)));
+      const candidates = [1, 2, 3, 7, 14, 30, 60, 90, 180, 365];
+      const step = candidates.find(value => Math.ceil(totalDays / value) <= maxTicks) || 365;
+      const ticks = [startDate];
+      for (let day = step; day < totalDays; day += step) {
+        ticks.push(addDays(startDate, day));
+      }
+      if (ticks.length > 1 && totalDays - daysBetween(startDate, ticks[ticks.length - 1]) < step * 0.45) {
+        ticks.pop();
+      }
+      if (ticks[ticks.length - 1] !== endDate) ticks.push(endDate);
+      return ticks;
+    }
+
+    function formatAxisDate(dateText) {
+      const [year, month, day] = String(dateText).split('-');
+      return `${month}/${day}`;
+    }
+
+    function formatDelta(value) {
+      if (!Number.isFinite(value)) return '-';
+      if (value === 0) return '0';
+      return `${value > 0 ? '+' : ''}${value}`;
+    }
+
+    function recordValue(record) {
+      const finalValue = Number(record?.final);
+      if (Number.isFinite(finalValue)) return finalValue;
+      const lastValue = Number(record?.last);
+      if (Number.isFinite(lastValue)) return lastValue;
+      return Number(record?.max);
+    }
+
+    let coinChartHoverPoints = [];
+
+    function setCoinStats(items) {
+      const container = document.getElementById('coin_chart_stats');
+      container.replaceChildren(...items.map(item => {
+        const card = document.createElement('div');
+        const label = document.createElement('div');
+        const value = document.createElement('div');
+        card.className = 'coin-stat';
+        label.className = 'coin-stat-label';
+        value.className = 'coin-stat-value';
+        label.textContent = item.label;
+        value.textContent = item.value;
+        card.append(label, value);
+        return card;
+      }));
+    }
+
+    function setupCoinChartHover() {
+      const canvas = document.getElementById('coin_chart');
+      const tooltip = document.getElementById('coin_chart_tooltip');
+      if (canvas.dataset.hoverReady === '1') return;
+      canvas.dataset.hoverReady = '1';
+      canvas.addEventListener('mouseleave', () => {
+        tooltip.style.display = 'none';
+      });
+      canvas.addEventListener('mousemove', event => {
+        if (!coinChartHoverPoints.length) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        let nearest = coinChartHoverPoints[0];
+        for (const point of coinChartHoverPoints) {
+          if (Math.abs(point.x - x) < Math.abs(nearest.x - x)) nearest = point;
+        }
+        tooltip.innerHTML = [
+          `<strong>${nearest.date}</strong>`,
+          `显示：${Number.isFinite(nearest.final) ? nearest.final : nearest.value}`,
+          `最高：${nearest.max}`,
+          `最低：${nearest.min}`,
+          `初始：${nearest.first}`,
+          `次数：${nearest.count || 1}`
+        ].join('<br>');
+        tooltip.style.display = 'block';
+        const left = Math.min(rect.width - 170, Math.max(8, nearest.x + 12));
+        const top = Math.max(8, nearest.y - 78);
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+      });
+    }
+
+    function drawCoinChart(records, userId) {
+      const canvas = document.getElementById('coin_chart');
+      const summary = document.getElementById('coin_chart_summary');
+      const list = document.getElementById('coin_record_list');
+      const wrap = canvas.parentElement;
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(320, wrap.clientWidth);
+      const height = Math.max(220, wrap.clientHeight);
+      canvas.width = Math.floor(width * ratio);
+      canvas.height = Math.floor(height * ratio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const userRecords = (((records || {}).users || {})[String(userId)] || {});
+      const dates = recentYearDates(Object.keys(userRecords));
+      const points = dates
+        .map(date => ({ date, record: userRecords[date] }))
+        .filter(point => point.record && Number.isFinite(Number(point.record.max)));
+      setupCoinChartHover();
+      coinChartHoverPoints = [];
+
+      if (!points.length) {
+        summary.textContent = `user ${userId} 暂无记录`;
+        setCoinStats([]);
+        list.replaceChildren();
+        ctx.fillStyle = '#64748b';
+        ctx.font = '14px Microsoft YaHei, sans-serif';
+        ctx.fillText('暂无淘金币记录', 24, 42);
+        return;
+      }
+
+      const values = points.flatMap(point => [Number(point.record.min), Number(point.record.max), recordValue(point.record)]).filter(Number.isFinite);
+      let minValue = Math.min(...values);
+      let maxValue = Math.max(...values);
+      if (minValue === maxValue) {
+        minValue -= 10;
+        maxValue += 10;
+      }
+      const pad = Math.max(10, (maxValue - minValue) * 0.08);
+      minValue = Math.max(0, minValue - pad);
+      maxValue += pad;
+
+      const first = points[0];
+      const latest = points[points.length - 1];
+      const dataStartDate = first.date;
+      const dataEndDate = latest.date;
+      const dataDays = daysBetween(dataStartDate, dataEndDate);
+      let startDate = dataStartDate;
+      let endDate = dataEndDate;
+      if (dataDays === 0) {
+        startDate = addDays(dataStartDate, -1);
+        endDate = addDays(dataEndDate, 1);
+      } else if (dataDays < 14) {
+        const padDays = Math.max(1, Math.ceil(dataDays * 0.25));
+        startDate = addDays(dataStartDate, -padDays);
+        endDate = addDays(dataEndDate, padDays);
+      }
+      const totalDays = Math.max(1, daysBetween(startDate, endDate));
+      const left = 62;
+      const right = 24;
+      const top = 24;
+      const bottom = 48;
+      const chartWidth = width - left - right;
+      const chartHeight = height - top - bottom;
+      const xForDate = date => left + daysBetween(startDate, date) * chartWidth / totalDays;
+      const yForValue = value => top + (maxValue - value) * chartHeight / (maxValue - minValue);
+
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#64748b';
+      ctx.font = '12px Microsoft YaHei, sans-serif';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i += 1) {
+        const y = top + chartHeight * i / 4;
+        const value = Math.round(maxValue - (maxValue - minValue) * i / 4);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(width - right, y);
+        ctx.stroke();
+        ctx.fillText(String(value), left - 9, y + 4);
+      }
+
+      function drawLine(key, color, widthPx) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = widthPx;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          const x = xForDate(point.date);
+          const y = yForValue(Number(point.record[key]));
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+
+      function drawValueLine(color, widthPx) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = widthPx;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          const x = xForDate(point.date);
+          const y = yForValue(recordValue(point.record));
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(left, top + chartHeight);
+      ctx.lineTo(width - right, top + chartHeight);
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      chooseTimeTicks(startDate, endDate, width).forEach(date => {
+        const x = xForDate(date);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, top + chartHeight);
+        ctx.stroke();
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(formatAxisDate(date), x, height - 18);
+      });
+
+      drawLine('min', '#93c5fd', 1.5);
+      drawValueLine('#d97706', 2.5);
+
+      const showEveryPoint = points.length <= 45;
+      points.forEach(point => {
+        const max = Number(point.record.max);
+        const min = Number(point.record.min);
+        const value = recordValue(point.record);
+        const x = xForDate(point.date);
+        const y = yForValue(value);
+        coinChartHoverPoints.push({
+          x,
+          y,
+          date: point.date,
+          value,
+          max,
+          min,
+          first: Number(point.record.first ?? max),
+          final: Number(point.record.final),
+          count: point.record.count
+        });
+        if (showEveryPoint || point === latest) {
+          ctx.fillStyle = point === latest ? '#d97706' : '#f59e0b';
+          ctx.beginPath();
+          ctx.arc(x, y, point === latest ? 4.5 : 3.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+
+      const latestValue = recordValue(latest.record);
+      const firstValue = recordValue(first.record);
+      const delta = latestValue - firstValue;
+      const allTimeLow = Math.min(...points.map(point => Number(point.record.min)));
+      const allTimeHigh = Math.max(...points.map(point => Number(point.record.max)));
+      const latestX = xForDate(latest.date);
+      const latestY = yForValue(latestValue);
+      ctx.textAlign = latestX > width - 140 ? 'right' : 'left';
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '12px Microsoft YaHei, sans-serif';
+      ctx.fillText(`${latest.date}  ${latestValue}`, latestX + (ctx.textAlign === 'right' ? -8 : 8), Math.max(16, latestY - 10));
+
+      summary.textContent = `user ${userId}｜有记录 ${points.length} 天｜最新 ${latestValue}｜变化 ${formatDelta(delta)}`;
+      setCoinStats([
+        { label: Number.isFinite(Number(latest.record.final)) ? '结束读数' : '最新观测', value: String(latestValue) },
+        { label: '一年变化', value: formatDelta(delta) },
+        { label: '区间最低', value: String(allTimeLow) },
+        { label: '区间最高', value: String(allTimeHigh) },
+        { label: '记录天数', value: `${points.length} 天` }
+      ]);
+
+      list.replaceChildren(...points.slice(-8).reverse().map(point => {
+        const div = document.createElement('div');
+        const value = recordValue(point.record);
+        const label = Number.isFinite(Number(point.record.final)) ? '终' : '新';
+        div.textContent = `${point.date}  ${label} ${value}  初 ${point.record.first}  低 ${point.record.min}  高 ${point.record.max}`;
+        return div;
+      }));
+    }
+
+    async function refreshCoinChart(userId) {
+      try {
+        const records = await fetch(`/api/taojinbi-records?t=${Date.now()}`, { cache: 'no-store' }).then(r => r.json());
+        const recordKey = `${userId}:${JSON.stringify((((records || {}).users || {})[String(userId)] || {}))}`;
+        if (recordKey === lastCoinRecordKey) return;
+        lastCoinRecordKey = recordKey;
+        drawCoinChart(records, userId);
+      } catch (err) {
+        document.getElementById('coin_chart_summary').textContent = `记录读取失败: ${err.message}`;
+      }
+    }
+
     async function refresh() {
       const stamp = Date.now();
       let status;
@@ -750,11 +1260,30 @@
       document.getElementById('energy_btn').disabled = status.running;
       document.getElementById('restart_service_btn').disabled = false;
       document.getElementById('version').textContent = text(status.version);
+      document.getElementById('restart_hint').textContent = status.restart_required ? `需重启（${text(status.rule_version)}）` : '';
       const androidUserId = String(status.android_user_id || '0');
       document.getElementById('android_user_id').textContent = androidUserId === '999' ? '分身淘宝 user 999' : '主淘宝 user 0';
       const userSelect = document.getElementById('android_user_select');
       if (document.activeElement !== userSelect) {
         userSelect.value = androidUserId;
+      }
+      const runAllUsersToggle = document.getElementById('run_all_users_toggle');
+      if (document.activeElement !== runAllUsersToggle) {
+        runAllUsersToggle.checked = Boolean(status.run_all_users);
+      }
+      document.getElementById('taojinbi_coin').textContent = text(status.taojinbi_coin);
+      await refreshCoinChart(androidUserId);
+      const dailyFallback = Boolean(status.allow_daily_version_fallback);
+      document.getElementById('daily_fallback').textContent = dailyFallback ? '开启' : '关闭';
+      const dailyFallbackToggle = document.getElementById('daily_fallback_toggle');
+      if (document.activeElement !== dailyFallbackToggle) {
+        dailyFallbackToggle.checked = dailyFallback;
+      }
+      const jumpEnergy = Boolean(status.enable_jump_energy);
+      document.getElementById('jump_energy').textContent = jumpEnergy ? '开启' : '关闭';
+      const jumpEnergyToggle = document.getElementById('jump_energy_toggle');
+      if (document.activeElement !== jumpEnergyToggle) {
+        jumpEnergyToggle.checked = jumpEnergy;
       }
       document.getElementById('activity').textContent = text(status.activity);
       document.getElementById('page_type').textContent = label(pageTypeLabels, status.page_type);
@@ -780,14 +1309,31 @@
       lastLogText = logText;
       logBox.replaceChildren(...logs.logs.map(line => {
         const div = document.createElement('div');
-        div.className = 'log-line';
-        div.textContent = line;
+        div.className = isPageActionLogLine(line) ? 'log-line page-action' : 'log-line';
+        renderLogLine(div, line);
         return div;
       }));
       const distanceToBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight;
       if (autoScrollLogs) {
         logBox.scrollTop = logBox.scrollHeight;
       }
+    }
+
+    function renderLogLine(container, line) {
+      const source = String(line || '');
+      const match = source.match(/(任务[:：]\s*|任务【)([^】；,，]+)(】?)/);
+      if (!match) {
+        container.textContent = source;
+        return;
+      }
+      const before = source.slice(0, match.index) + match[1];
+      const name = match[2];
+      const after = source.slice(match.index + match[0].length);
+      container.append(document.createTextNode(before));
+      const span = document.createElement('span');
+      span.className = 'log-task-name';
+      span.textContent = name;
+      container.append(span, document.createTextNode(after));
     }
 
     refresh();

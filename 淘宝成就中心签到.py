@@ -78,5 +78,3 @@ while True:
         print("任务都做完了，退出循环")
         break
 ctx.close()
-d.shell("settings put system accelerometer_rotation 0")
-print("关闭手机自动旋转")

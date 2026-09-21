@@ -49,8 +49,6 @@ if earn_btn.exists:
     earn_btn.click()
     time.sleep(3)
     ctx.close()
-d.shell("settings put system accelerometer_rotation 0")
-print("关闭手机自动旋转")
 time2 = time.time()
 minutes, seconds = divmod(int(time2 - time1), 60)
 print(f"共耗时: {minutes} 分钟 {seconds} 秒")
