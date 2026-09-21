@@ -9,6 +9,19 @@ object ObserverState {
     var latestExternalObservation: Observation? = null
         private set
 
+    @Volatile
+    var latestEventPackageName: String? = null
+        private set
+
+    @Volatile
+    var latestEventClassName: String? = null
+        private set
+
+    fun updateEvent(packageName: String?, className: String?) {
+        latestEventPackageName = packageName
+        latestEventClassName = className
+    }
+
     fun publish(observation: Observation) {
         latestExternalObservation = observation
         listeners.forEach { listener ->

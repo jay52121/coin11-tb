@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">淘金币 Android Observer</string>
+    <string name="app_name">淘金币 Android Capability Lab</string>
     <string name="accessibility_service_label">淘金币页面观察器</string>
-    <string name="accessibility_service_description">仅用于读取当前界面的无障碍节点并生成调试快照。v0.1 不执行点击、滑动或其他自动操作。</string>
+    <string name="accessibility_service_description">用于读取当前界面的无障碍节点，并在用户主动触发时验证点击、滑动、返回、截图和 OCR 等 Android 能力。</string>
 </resources>

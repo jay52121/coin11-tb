@@ -2,7 +2,9 @@ package com.coin11.taojinbi
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.format.DateFormat
@@ -13,14 +15,19 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.coin11.taojinbi.accessibility.TaojinbiAccessibilityService
+import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.NodeSnapshot
 import com.coin11.taojinbi.observation.Observation
 import com.coin11.taojinbi.observation.ObserverState
+import com.coin11.taojinbi.shizuku.ShizukuBridge
+import rikka.shizuku.Shizuku
 import java.util.Date
 
 class MainActivity : Activity() {
 
     private lateinit var serviceStatus: TextView
+    private lateinit var shizukuStatus: TextView
+    private lateinit var capabilityOutput: TextView
     private lateinit var snapshotSummary: TextView
     private lateinit var nodeDump: TextView
 
@@ -30,21 +37,65 @@ class MainActivity : Activity() {
         }
     }
 
+    private val capabilityListener: () -> Unit = {
+        runOnUiThread {
+            render(ObserverState.latestExternalObservation)
+        }
+    }
+
+    private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
+        CapabilityState.publish("Shizuku", "binder 已连接。")
+        render(ObserverState.latestExternalObservation)
+    }
+
+    private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
+        CapabilityState.publish("Shizuku", "binder 已断开。")
+        render(ObserverState.latestExternalObservation)
+    }
+
+    private val shizukuPermissionListener =
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == ShizukuBridge.REQUEST_CODE) {
+                CapabilityState.publish(
+                    "Shizuku 授权结果",
+                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                        "GRANTED"
+                    } else {
+                        "DENIED"
+                    },
+                )
+                render(ObserverState.latestExternalObservation)
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "淘金币 Android Observer"
+        title = "淘金币 Android Capability Lab"
         setContentView(buildContent())
+
+        Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
+        Shizuku.addBinderDeadListener(shizukuBinderDeadListener)
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
     }
 
     override fun onResume() {
         super.onResume()
         ObserverState.addListener(observationListener)
+        CapabilityState.addListener(capabilityListener)
         render(ObserverState.latestExternalObservation)
     }
 
     override fun onPause() {
+        CapabilityState.removeListener(capabilityListener)
         ObserverState.removeListener(observationListener)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        Shizuku.removeBinderDeadListener(shizukuBinderDeadListener)
+        Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
+        super.onDestroy()
     }
 
     private fun buildContent(): ScrollView {
@@ -55,51 +106,115 @@ class MainActivity : Activity() {
         }
 
         content.addView(TextView(this).apply {
-            text = "淘金币 Android Observer · v0.1"
+            text = "淘金币 Android · 0.1T 技术穿透"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
         })
 
         content.addView(TextView(this).apply {
-            text = "只观察，不点击。先切到淘宝浏览几个页面，再回到这里查看最后一次外部页面快照。"
+            text = "这里只验证 Android 技术能力，不运行淘金币任务。所有动作都必须手动按按钮触发。"
             textSize = 15f
             setPadding(0, dp(8), 0, dp(14))
         })
 
-        serviceStatus = TextView(this).apply {
-            textSize = 16f
-        }
+        serviceStatus = TextView(this).apply { textSize = 15f }
         content.addView(serviceStatus)
 
-        content.addView(Button(this).apply {
-            text = "打开无障碍设置"
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-        })
+        shizukuStatus = TextView(this).apply {
+            textSize = 15f
+            setPadding(0, dp(6), 0, dp(10))
+        }
+        content.addView(shizukuStatus)
 
-        content.addView(TextView(this).apply {
-            text = "最后一次外部页面观察"
-            textSize = 18f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(18), 0, dp(6))
-        })
+        addButton(content, "打开无障碍设置") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+
+        addSectionTitle(content, "标准 Android / Accessibility")
+
+        addButton(content, "打开淘宝首页") {
+            openTaobaoHome()
+        }
+
+        addButton(content, "打开淘金币 Deep Link") {
+            openCoinHome()
+        }
+
+        addButton(content, "淘金币 → 2 秒后截图 + 中文 OCR") {
+            scheduleAccessibilityTest(
+                scheduler = TaojinbiAccessibilityService::scheduleScreenshotAndOcr,
+            )
+        }
+
+        addButton(content, "淘金币 → 2 秒后 Swipe Up") {
+            scheduleAccessibilityTest(
+                scheduler = TaojinbiAccessibilityService::scheduleSwipeUp,
+            )
+        }
+
+        addButton(content, "淘金币 → 2 秒后 Tap 屏幕中心") {
+            scheduleAccessibilityTest(
+                scheduler = TaojinbiAccessibilityService::scheduleTapCenter,
+            )
+        }
+
+        addButton(content, "淘金币 → 2 秒后 Global Back") {
+            scheduleAccessibilityTest(
+                scheduler = TaojinbiAccessibilityService::scheduleBack,
+            )
+        }
+
+        addSectionTitle(content, "Shizuku / 高权限能力")
+
+        addButton(content, "刷新 Shizuku 状态") {
+            CapabilityState.publish("Shizuku 状态", ShizukuBridge.statusText())
+        }
+
+        addButton(content, "请求 Shizuku 授权") {
+            ShizukuBridge.requestPermission()
+        }
+
+        addButton(content, "Shizuku 基础检查：id / users / 前台 Activity") {
+            ShizukuBridge.runProbeSuite()
+        }
+
+        addButton(content, "只查询前台 Activity") {
+            ShizukuBridge.queryForegroundActivity()
+        }
+
+        addButton(content, "force-stop 淘宝 · user 0") {
+            ShizukuBridge.forceStopTaobao(0)
+        }
+
+        addButton(content, "启动淘金币 · user 999") {
+            ShizukuBridge.openCoinAsUser(999, COIN_HOME_URL)
+        }
+
+        addButton(content, "force-stop 淘宝 · user 999") {
+            ShizukuBridge.forceStopTaobao(999)
+        }
+
+        addSectionTitle(content, "技术验证结果")
+
+        capabilityOutput = TextView(this).apply {
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        content.addView(capabilityOutput)
+
+        addSectionTitle(content, "最后一次外部页面 Observation")
 
         snapshotSummary = TextView(this).apply {
-            textSize = 15f
+            textSize = 14f
             setTextIsSelectable(true)
         }
         content.addView(snapshotSummary)
 
-        content.addView(TextView(this).apply {
-            text = "节点（优先显示有 text / description / viewId 的节点）"
-            textSize = 18f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(18), 0, dp(6))
-        })
+        addSectionTitle(content, "节点样本")
 
         nodeDump = TextView(this).apply {
-            textSize = 12f
+            textSize = 11f
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
             gravity = Gravity.START
@@ -116,15 +231,97 @@ class MainActivity : Activity() {
         return scrollView
     }
 
+    private fun addSectionTitle(content: LinearLayout, title: String) {
+        content.addView(TextView(this).apply {
+            text = title
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(18), 0, dp(6))
+        })
+    }
+
+    private fun addButton(
+        content: LinearLayout,
+        label: String,
+        onClick: () -> Unit,
+    ) {
+        content.addView(Button(this).apply {
+            text = label
+            setOnClickListener {
+                runCatching(onClick)
+                    .onFailure { error ->
+                        CapabilityState.publish(label, error.stackTraceToString())
+                    }
+            }
+        })
+    }
+
+    private fun scheduleAccessibilityTest(
+        scheduler: (Long) -> Boolean,
+    ) {
+        if (!TaojinbiAccessibilityService.isRunning()) {
+            CapabilityState.publish(
+                "Accessibility 测试",
+                "无障碍服务未连接，无法执行。",
+            )
+            return
+        }
+
+        val scheduled = scheduler(2200L)
+        if (!scheduled) {
+            CapabilityState.publish(
+                "Accessibility 测试",
+                "动作没有成功排队。",
+            )
+            return
+        }
+
+        openCoinHome()
+    }
+
+    private fun openTaobaoHome() {
+        val intent = packageManager.getLaunchIntentForPackage(TAOBAO_PACKAGE)
+        if (intent == null) {
+            CapabilityState.publish("启动淘宝", "找不到淘宝启动 Intent。")
+            return
+        }
+
+        startActivity(intent)
+        CapabilityState.publish("启动淘宝", "已发送淘宝启动 Intent。")
+    }
+
+    private fun openCoinHome() {
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse(COIN_HOME_URL),
+        ).apply {
+            setPackage(TAOBAO_PACKAGE)
+        }
+
+        runCatching {
+            startActivity(intent)
+        }.onSuccess {
+            CapabilityState.publish("淘金币 Deep Link", "已发送 ACTION_VIEW。")
+        }.onFailure { error ->
+            CapabilityState.publish(
+                "淘金币 Deep Link 失败",
+                error.stackTraceToString(),
+            )
+        }
+    }
+
     private fun render(observation: Observation?) {
         serviceStatus.text = if (TaojinbiAccessibilityService.isRunning()) {
             "Accessibility：已连接 ✓"
         } else {
-            "Accessibility：未连接。请先在系统设置里开启“淘金币页面观察器”。"
+            "Accessibility：未连接"
         }
 
+        shizukuStatus.text = "Shizuku：\n${ShizukuBridge.statusText()}"
+        capabilityOutput.text = CapabilityState.render()
+
         if (observation == null) {
-            snapshotSummary.text = "暂无外部页面快照。开启无障碍后切到淘宝，再回到本 App。"
+            snapshotSummary.text = "暂无外部页面快照。"
             nodeDump.text = ""
             return
         }
@@ -139,9 +336,11 @@ class MainActivity : Activity() {
             appendLine("时间：$capturedAt")
             appendLine("package：${observation.packageName ?: "(null)"}")
             appendLine("windowId：${observation.windowId ?: -1}")
+            appendLine("最后 event package：${ObserverState.latestEventPackageName ?: "(null)"}")
+            appendLine("最后 event class：${ObserverState.latestEventClassName ?: "(null)"}")
             appendLine("节点总数：${observation.nodes.size}")
             appendLine("有效信息节点：${observation.interestingNodeCount}")
-            append("是否截断：${if (observation.truncated) "是（达到节点上限）" else "否"}")
+            append("是否截断：${if (observation.truncated) "是" else "否"}")
         }
 
         val interesting = observation.nodes.filter(::isInteresting)
@@ -171,24 +370,20 @@ class MainActivity : Activity() {
         if (!node.enabled) append(" DISABLED")
         appendLine()
 
-        if (!node.text.isNullOrBlank()) {
-            appendLine("  text=${node.text}")
-        }
-        if (!node.contentDescription.isNullOrBlank()) {
-            appendLine("  desc=${node.contentDescription}")
-        }
-        if (!node.viewId.isNullOrBlank()) {
-            appendLine("  id=${node.viewId}")
-        }
-        if (!node.className.isNullOrBlank()) {
-            append("  class=${node.className}")
-        }
+        if (!node.text.isNullOrBlank()) appendLine("  text=${node.text}")
+        if (!node.contentDescription.isNullOrBlank()) appendLine("  desc=${node.contentDescription}")
+        if (!node.viewId.isNullOrBlank()) appendLine("  id=${node.viewId}")
+        if (!node.className.isNullOrBlank()) append("  class=${node.className}")
     }
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
     companion object {
-        private const val MAX_DISPLAY_NODES = 180
+        private const val MAX_DISPLAY_NODES = 120
+        private const val TAOBAO_PACKAGE = "com.taobao.taobao"
+
+        private const val COIN_HOME_URL =
+            "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
     }
 }
