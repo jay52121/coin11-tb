@@ -15,6 +15,7 @@ from uiautomator2.exceptions import AdbShellError
 from phone_alert import notify_phone
 from screen_ocr import get_reader as warmup_ocr_reader, image_has_text, normalize_text, read_ocr_results
 from taojinbi.actions import ActionExecutor
+from golden_snapshot import GoldenSnapshotRecorder
 from gui_state import append_key_log, read_control, read_rules, record_taojinbi_coin, update_status as write_gui_status
 from utils import check_chars_exist, other_app, get_current_app, select_device, check_verify, TB_APP
 
@@ -74,6 +75,8 @@ page_actions = ActionExecutor(d, screen_width, screen_height)
 BASE_DIR = Path(__file__).resolve().parent
 GOOD_SHOP_TRACE_LOG = BASE_DIR / "logs" / "good_shop_trace.log"
 EXTERNAL_APP_TRACE_LOG = BASE_DIR / "logs" / "external_app_trace.log"
+GOLDEN_RECORDER = GoldenSnapshotRecorder(BASE_DIR, VERSION, ANDROID_USER_ID, read_rules)
+_last_classification_root = None
 
 
 def warmup_ocr_async():
@@ -847,9 +850,11 @@ def looks_like_shop_browse_task(task_name, texts):
     return any(word in source for word in ["浏览店铺", "逛店铺", "逛好店"])
 
 
-def classify_current_page():
+def _classify_current_page():
+    global _last_classification_root
     package_name, activity_name = get_current_app(d)
     root = dump_root()
+    _last_classification_root = root
     all_texts = texts_from_root(root, None)
     texts = all_texts[:120]
     allow_text_fallback = package_name in (TB_APP, None, "")
@@ -922,6 +927,23 @@ def classify_current_page():
     return page_type, package_name, activity_name, texts
 
 
+def classify_current_page(capture_reason="classification"):
+    result = _classify_current_page()
+    page_type, package_name, activity_name, texts = result
+    try:
+        GOLDEN_RECORDER.capture(
+            _last_classification_root,
+            package_name,
+            activity_name,
+            page_type,
+            page_signature(page_type, package_name, activity_name, texts),
+            reason=capture_reason,
+        )
+    except Exception as exc:
+        print("Golden Snapshot采集失败", exc)
+    return result
+
+
 def page_signature(page_type, package_name, activity_name, texts):
     stable_texts = []
     ignore_patterns = [
@@ -947,7 +969,7 @@ def page_signature(page_type, package_name, activity_name, texts):
 
 
 def log_page_position(reason):
-    page_type, package_name, activity_name, texts = classify_current_page()
+    page_type, package_name, activity_name, texts = classify_current_page(capture_reason=reason)
     info = {
         "page": page_type,
         "package": package_name,

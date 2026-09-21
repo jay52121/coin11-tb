@@ -50,7 +50,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     }
 
     private fun scheduleCapture() {
-        handler.removeCallbacks(captureRunnable)
+        // Do not debounce forever on pages that continuously emit content-change events.
+        if (handler.hasCallbacks(captureRunnable)) {
+            return
+        }
 
         val now = System.currentTimeMillis()
         val waitMillis = (MIN_CAPTURE_INTERVAL_MS - (now - lastCaptureAt)).coerceAtLeast(0L)
