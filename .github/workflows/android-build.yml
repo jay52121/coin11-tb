@@ -33,3 +33,10 @@ jobs:
 
       - name: Assemble debug
         run: gradle :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: taojinbi-android-v0.1-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
