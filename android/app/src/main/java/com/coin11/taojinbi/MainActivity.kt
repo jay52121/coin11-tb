@@ -19,6 +19,8 @@ import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.NodeSnapshot
 import com.coin11.taojinbi.observation.Observation
 import com.coin11.taojinbi.observation.ObserverState
+import com.coin11.taojinbi.recognizer.PageRecognizer
+import com.coin11.taojinbi.recognizer.RulesLoader
 import com.coin11.taojinbi.shizuku.ShizukuBridge
 import rikka.shizuku.Shizuku
 import java.util.Date
@@ -28,7 +30,12 @@ class MainActivity : Activity() {
     private lateinit var serviceStatus: TextView
     private lateinit var shizukuStatus: TextView
     private lateinit var capabilityOutput: TextView
+    private lateinit var recognitionOutput: TextView
     private lateinit var snapshotSummary: TextView
+
+    private lateinit var pageRecognizer: PageRecognizer
+    private lateinit var rulesSource: String
+    private var rulesError: String? = null
     private lateinit var nodeDump: TextView
 
     private val observationListener: (Observation?) -> Unit = { observation ->
@@ -70,7 +77,13 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "淘金币 Android Capability Lab"
+        title = "淘金币 Android Page Recognizer"
+
+        val loadedRules = RulesLoader.load(this)
+        pageRecognizer = PageRecognizer(loadedRules.rules)
+        rulesSource = loadedRules.source
+        rulesError = loadedRules.error
+
         setContentView(buildContent())
 
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
@@ -106,13 +119,13 @@ class MainActivity : Activity() {
         }
 
         content.addView(TextView(this).apply {
-            text = "淘金币 Android · 0.1T 技术穿透"
+            text = "淘金币 Android · 0.2 页面识别"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
         })
 
         content.addView(TextView(this).apply {
-            text = "这里只验证 Android 技术能力，不运行淘金币任务。所有动作都必须手动按按钮触发。"
+            text = "当前只做 Observation → PageType，不运行任务、不自动操作。下方保留 0.1T 手动技术工具。"
             textSize = 15f
             setPadding(0, dp(8), 0, dp(14))
         })
@@ -129,6 +142,17 @@ class MainActivity : Activity() {
         addButton(content, "打开无障碍设置") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+
+        addSectionTitle(content, "页面识别（v0.2）")
+
+        recognitionOutput = TextView(this).apply {
+            textSize = 15f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        content.addView(recognitionOutput)
+
+        addSectionTitle(content, "0.1T 手动技术工具")
 
         addSectionTitle(content, "标准 Android / Accessibility")
 
@@ -321,10 +345,26 @@ class MainActivity : Activity() {
         capabilityOutput.text = CapabilityState.render()
 
         if (observation == null) {
+            recognitionOutput.text = buildString {
+                appendLine("Page：等待 Observation")
+                appendLine("Rules：$rulesSource")
+                rulesError?.let { append("Rules fallback：$it") }
+            }.trimEnd()
             snapshotSummary.text = "暂无外部页面快照。"
             nodeDump.text = ""
             return
         }
+
+        val recognition = pageRecognizer.recognize(
+            observation = observation,
+            activityHint = ObserverState.latestWindowStateClassName,
+        )
+        recognitionOutput.text = buildString {
+            appendLine(recognition.debugText())
+            appendLine("Activity hint：${ObserverState.latestWindowStateClassName ?: "(none)"}")
+            appendLine("Rules：$rulesSource")
+            rulesError?.let { append("Rules fallback：$it") }
+        }.trimEnd()
 
         val capturedAt = DateFormat.format(
             "yyyy-MM-dd HH:mm:ss.SSS",
@@ -338,6 +378,7 @@ class MainActivity : Activity() {
             appendLine("windowId：${observation.windowId ?: -1}")
             appendLine("最后 event package：${ObserverState.latestEventPackageName ?: "(null)"}")
             appendLine("最后 event class：${ObserverState.latestEventClassName ?: "(null)"}")
+            appendLine("window-state class：${ObserverState.latestWindowStateClassName ?: "(null)"}")
             appendLine("节点总数：${observation.nodes.size}")
             appendLine("有效信息节点：${observation.interestingNodeCount}")
             append("是否截断：${if (observation.truncated) "是" else "否"}")

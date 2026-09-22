@@ -1,4 +1,4 @@
-name: Android build
+name: Android verify
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  assemble-debug:
+  verify-debug:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -31,12 +31,12 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
-      - name: Assemble debug
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Unit tests, lint, assemble
+        run: gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: taojinbi-android-v0.1-debug
+          name: taojinbi-android-v0.2-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

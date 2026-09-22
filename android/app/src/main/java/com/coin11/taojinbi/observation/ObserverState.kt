@@ -17,9 +17,20 @@ object ObserverState {
     var latestEventClassName: String? = null
         private set
 
-    fun updateEvent(packageName: String?, className: String?) {
+    @Volatile
+    var latestWindowStateClassName: String? = null
+        private set
+
+    fun updateEvent(
+        packageName: String?,
+        className: String?,
+        isWindowStateChange: Boolean,
+    ) {
         latestEventPackageName = packageName
         latestEventClassName = className
+        if (isWindowStateChange && !className.isNullOrBlank()) {
+            latestWindowStateClassName = className
+        }
     }
 
     fun publish(observation: Observation) {

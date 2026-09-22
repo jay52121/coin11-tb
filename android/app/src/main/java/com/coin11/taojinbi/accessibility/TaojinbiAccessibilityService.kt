@@ -47,7 +47,11 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             return
         }
 
-        ObserverState.updateEvent(packageName, className)
+        ObserverState.updateEvent(
+            packageName = packageName,
+            className = className,
+            isWindowStateChange = event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+        )
         scheduleCapture()
     }
 
