@@ -32,9 +32,6 @@ class MainActivity : Activity() {
     private lateinit var recognitionOutput: TextView
     private lateinit var snapshotSummary: TextView
 
-    private lateinit var pageRecognizer: PageRecognizer
-    private lateinit var rulesSource: String
-    private var rulesError: String? = null
     private lateinit var nodeDump: TextView
 
     private val observationListener: (Observation?) -> Unit = { observation ->
