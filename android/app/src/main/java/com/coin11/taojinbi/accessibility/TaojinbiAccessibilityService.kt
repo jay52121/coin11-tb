@@ -187,7 +187,21 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
     private fun screenshotAndOcr() {
         val startedAt = SystemClock.elapsedRealtime()
-        val observationId = ObserverState.latestExternalObservation?.id
+        val currentPackage = rootInActiveWindow?.packageName?.toString()
+        if (currentPackage == packageName) {
+            CapabilityState.publish(
+                "OCR",
+                "当前前台是调试 App，未执行截图；请切到目标页面后再触发。",
+            )
+            return
+        }
+
+        val sourceObservation = ObserverState.latestExternalObservation
+            ?.takeIf {
+                ObserverState.latestObservationValid &&
+                    (currentPackage.isNullOrBlank() || it.packageName == currentPackage)
+            }
+        val observationId = sourceObservation?.id
 
         takeScreenshot(
             Display.DEFAULT_DISPLAY,
