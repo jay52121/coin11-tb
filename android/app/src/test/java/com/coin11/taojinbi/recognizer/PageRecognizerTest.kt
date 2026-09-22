@@ -82,6 +82,30 @@ class PageRecognizerTest {
     }
 
     @Test
+    fun taobaoHomeWithShoppingCartIsNotCoinHome() {
+        assertPage(
+            PageType.TAOBAO_HOME,
+            observation("com.taobao.taobao", "搜索栏", "推荐", "购物车", "领淘金币"),
+        )
+    }
+
+    @Test
+    fun coinHomeFastEarnEntryIsNotTaskList() {
+        assertPage(
+            PageType.COIN_HOME,
+            observation("com.taobao.taobao", "淘金币首页", "2分钟快速赚", "赚更多金币", "购物车"),
+        )
+    }
+
+    @Test
+    fun taskListStillUsesCombinedTaskSignals() {
+        assertPage(
+            PageType.DAILY_TASK_LIST,
+            observation("com.taobao.taobao", "今日速赚560淘金币", "完成下方任务", "发现精选好物(0/3)"),
+        )
+    }
+
+    @Test
     fun recognizesTaobaoHome() {
         assertPage(
             PageType.TAOBAO_HOME,

@@ -211,8 +211,7 @@ class PageRecognizer(
 
     private fun looksLikeTaskListPage(texts: List<String>): Boolean {
         if (looksLikeSearchBrowsePage(texts)) return false
-        return hasAny(texts, rules.taskListWords) ||
-            looksLikeDailyTaskListByNodes(texts)
+        return looksLikeDailyTaskListByNodes(texts)
     }
 
     private fun looksLikeDailyTaskListByNodes(texts: List<String>): Boolean {
@@ -241,11 +240,18 @@ class PageRecognizer(
     private fun looksLikeCoinHomePage(texts: List<String>): Boolean {
         if (looksLikeCoinTaskPanel(texts)) return false
 
-        if (hasAny(texts, rules.coinHomeTaskWords + rules.taskListBottomWords)) {
+        if (looksLikeDailyTaskListByNodes(texts) || looksLikeMoreCoinExpandSection(texts)) {
             return false
         }
 
-        return hasAny(texts, rules.coinHomeWords) &&
+        val hasCoinHomeAnchor = hasAny(
+            texts,
+            listOf("淘金币首页", "淘金币标题", "赚更多金币", "赚金币抵钱"),
+        )
+        val hasCoinHomeSupport = hasAny(texts, rules.coinHomeWords)
+
+        return hasCoinHomeAnchor &&
+            hasCoinHomeSupport &&
             !looksLikeSearchBrowsePage(texts)
     }
 
