@@ -10,6 +10,14 @@ object ObserverState {
         private set
 
     @Volatile
+    var latestObservationValid: Boolean = false
+        private set
+
+    @Volatile
+    var invalidationReason: String? = null
+        private set
+
+    @Volatile
     var latestEventPackageName: String? = null
         private set
 
@@ -35,9 +43,16 @@ object ObserverState {
 
     fun publish(observation: Observation) {
         latestExternalObservation = observation
-        listeners.forEach { listener ->
-            runCatching { listener(observation) }
-        }
+        latestObservationValid = true
+        invalidationReason = null
+        notifyListeners()
+    }
+
+    fun invalidate(reason: String) {
+        if (latestExternalObservation == null) return
+        latestObservationValid = false
+        invalidationReason = reason
+        notifyListeners()
     }
 
     fun addListener(listener: (Observation?) -> Unit) {
@@ -47,5 +62,12 @@ object ObserverState {
 
     fun removeListener(listener: (Observation?) -> Unit) {
         listeners -= listener
+    }
+
+    private fun notifyListeners() {
+        val observation = latestExternalObservation
+        listeners.forEach { listener ->
+            runCatching { listener(observation) }
+        }
     }
 }

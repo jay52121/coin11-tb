@@ -2,6 +2,7 @@ package com.coin11.taojinbi.ocr
 
 import android.graphics.Bitmap
 import android.os.SystemClock
+import com.coin11.taojinbi.observation.IntRect
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -16,7 +17,7 @@ object MlKitChineseOcr {
 
     fun recognize(
         bitmap: Bitmap,
-        callback: (Result<String>) -> Unit,
+        callback: (Result<OcrRecognition>) -> Unit,
     ) {
         val startedAt = SystemClock.elapsedRealtime()
         val image = InputImage.fromBitmap(bitmap, 0)
@@ -27,30 +28,31 @@ object MlKitChineseOcr {
                 val lines = result.textBlocks
                     .flatMap { it.lines }
                     .mapNotNull { line ->
-                        val text = line.text.trim()
-                        if (text.isBlank()) {
+                        val value = line.text.trim()
+                        if (value.isBlank()) {
                             null
                         } else {
-                            val bounds = line.boundingBox
-                            if (bounds == null) {
-                                text
-                            } else {
-                                "${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}  $text"
+                            val bounds = line.boundingBox?.let {
+                                IntRect(
+                                    left = it.left,
+                                    top = it.top,
+                                    right = it.right,
+                                    bottom = it.bottom,
+                                )
                             }
+                            OcrLine(
+                                text = value,
+                                bounds = bounds,
+                            )
                         }
                     }
 
                 callback(
                     Result.success(
-                        buildString {
-                            appendLine("耗时：${elapsed}ms")
-                            appendLine("文本行：${lines.size}")
-                            appendLine()
-                            lines.take(160).forEach(::appendLine)
-                            if (lines.size > 160) {
-                                append("…还有 ${lines.size - 160} 行未显示")
-                            }
-                        }.trimEnd(),
+                        OcrRecognition(
+                            elapsedMillis = elapsed,
+                            lines = lines,
+                        ),
                     ),
                 )
             }

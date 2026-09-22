@@ -19,6 +19,7 @@ import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.NodeSnapshot
 import com.coin11.taojinbi.observation.Observation
 import com.coin11.taojinbi.observation.ObserverState
+import com.coin11.taojinbi.ocr.OcrState
 import com.coin11.taojinbi.recognizer.RecognitionState
 import com.coin11.taojinbi.shizuku.ShizukuBridge
 import rikka.shizuku.Shizuku
@@ -30,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var shizukuStatus: TextView
     private lateinit var capabilityOutput: TextView
     private lateinit var recognitionOutput: TextView
+    private lateinit var ocrOutput: TextView
     private lateinit var snapshotSummary: TextView
 
     private lateinit var nodeDump: TextView
@@ -73,7 +75,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "淘金币 Android Page Recognizer"
+        title = "淘金币 Android v0.3"
         setContentView(buildContent())
 
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
@@ -109,13 +111,13 @@ class MainActivity : Activity() {
         }
 
         content.addView(TextView(this).apply {
-            text = "淘金币 Android · 0.2 页面识别"
+            text = "淘金币 Android · 0.3 OCR + Actions"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
         })
 
         content.addView(TextView(this).apply {
-            text = "当前只做 Observation → PageType，不运行任务、不自动操作。下方保留 0.1T 手动技术工具。"
+            text = "Observation / PageType 保持不变；v0.3 增加结构化 OCR 与统一基础动作层，仍不运行 TaskEngine。"
             textSize = 15f
             setPadding(0, dp(8), 0, dp(14))
         })
@@ -141,6 +143,21 @@ class MainActivity : Activity() {
             setTextIsSelectable(true)
         }
         content.addView(recognitionOutput)
+
+        addSectionTitle(content, "OCR（v0.3）")
+
+        addButton(content, "OCR 当前外部页面") {
+            if (!TaojinbiAccessibilityService.scheduleScreenshotAndOcr(0L)) {
+                CapabilityState.publish("OCR", "无障碍服务未连接。")
+            }
+        }
+
+        ocrOutput = TextView(this).apply {
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        content.addView(ocrOutput)
 
         addSectionTitle(content, "0.1T 手动技术工具")
 
@@ -333,6 +350,7 @@ class MainActivity : Activity() {
 
         shizukuStatus.text = "Shizuku：\n${ShizukuBridge.statusText()}"
         capabilityOutput.text = CapabilityState.render()
+        ocrOutput.text = OcrState.latest?.debugText(maxLines = 16) ?: "暂无 OCR 快照。"
 
         if (observation == null) {
             recognitionOutput.text = buildString {
@@ -379,6 +397,8 @@ class MainActivity : Activity() {
             appendLine("window-state class：${ObserverState.latestWindowStateClassName ?: "(null)"}")
             appendLine("节点总数：${observation.nodes.size}")
             appendLine("有效信息节点：${observation.interestingNodeCount}")
+            appendLine("Observation：${if (ObserverState.latestObservationValid) "有效" else "已失效"}")
+            ObserverState.invalidationReason?.let { appendLine("失效原因：$it") }
             append("是否截断：${if (observation.truncated) "是" else "否"}")
         }
 

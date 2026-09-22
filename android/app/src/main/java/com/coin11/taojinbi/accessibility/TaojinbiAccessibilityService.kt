@@ -2,18 +2,20 @@ package com.coin11.taojinbi.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
-import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
+import com.coin11.taojinbi.actions.AccessibilityActionExecutor
+import com.coin11.taojinbi.actions.ActionResult
 import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.ObservationCollector
 import com.coin11.taojinbi.observation.ObserverState
 import com.coin11.taojinbi.ocr.MlKitChineseOcr
+import com.coin11.taojinbi.ocr.OcrSnapshot
+import com.coin11.taojinbi.ocr.OcrState
 import com.coin11.taojinbi.recognizer.PageRecognizer
 import com.coin11.taojinbi.recognizer.RecognitionSnapshot
 import com.coin11.taojinbi.recognizer.RecognitionState
@@ -24,6 +26,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private val collector = ObservationCollector()
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var pageRecognizer: PageRecognizer
+    private lateinit var actionExecutor: AccessibilityActionExecutor
     private var lastCaptureAt = 0L
 
     private val captureRunnable = Runnable {
@@ -41,6 +44,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         val loadedRules = RulesLoader.load(this)
         pageRecognizer = PageRecognizer(loadedRules.rules)
+        actionExecutor = AccessibilityActionExecutor(this)
         RecognitionState.configureRules(
             source = loadedRules.source,
             error = loadedRules.error,
@@ -131,77 +135,59 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun tapCenter() {
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
-        val x = width * 0.5f
-        val y = height * 0.5f
+        val x = (width * 0.5f).toInt()
+        val y = (height * 0.5f).toInt()
 
-        val path = Path().apply {
-            moveTo(x, y)
+        val queued = actionExecutor.tap(x, y) { result ->
+            publishActionResult("Accessibility Tap", result)
         }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 80))
-            .build()
-
-        dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    CapabilityState.publish(
-                        "Accessibility Tap",
-                        "成功：x=${x.toInt()}, y=${y.toInt()}",
-                    )
-                }
-
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    CapabilityState.publish("Accessibility Tap", "手势被取消。")
-                }
-            },
-            null,
-        )
+        if (queued) {
+            ObserverState.invalidate("tap(" + x + "," + y + ")")
+        }
     }
 
     private fun swipeUp() {
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
-        val x = width * 0.5f
-        val startY = height * 0.75f
-        val endY = height * 0.35f
+        val x = (width * 0.5f).toInt()
+        val startY = (height * 0.75f).toInt()
+        val endY = (height * 0.35f).toInt()
 
-        val path = Path().apply {
-            moveTo(x, startY)
-            lineTo(x, endY)
+        val queued = actionExecutor.swipe(
+            startX = x,
+            startY = startY,
+            endX = x,
+            endY = endY,
+        ) { result ->
+            publishActionResult("Accessibility Swipe", result)
         }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 500))
-            .build()
-
-        dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    CapabilityState.publish(
-                        "Accessibility Swipe",
-                        "成功：(${x.toInt()},${startY.toInt()}) → (${x.toInt()},${endY.toInt()})",
-                    )
-                }
-
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    CapabilityState.publish("Accessibility Swipe", "手势被取消。")
-                }
-            },
-            null,
-        )
+        if (queued) {
+            ObserverState.invalidate("swipe")
+        }
     }
 
     private fun globalBack() {
-        val accepted = performGlobalAction(GLOBAL_ACTION_BACK)
+        val result = actionExecutor.back()
+        publishActionResult("Accessibility Back", result)
+        if (result.success) {
+            ObserverState.invalidate("back")
+        }
+    }
+
+    private fun publishActionResult(label: String, result: ActionResult) {
         CapabilityState.publish(
-            "Accessibility Back",
-            "performGlobalAction 返回：$accepted",
+            label,
+            if (result.success) {
+                "成功：" + result.detail
+            } else {
+                "失败：" + result.detail
+            },
         )
     }
 
     private fun screenshotAndOcr() {
         val startedAt = SystemClock.elapsedRealtime()
+        val observationId = ObserverState.latestExternalObservation?.id
 
         takeScreenshot(
             Display.DEFAULT_DISPLAY,
@@ -225,14 +211,22 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         return
                     }
 
-                    CapabilityState.publish(
-                        "Screenshot",
-                        "成功：${bitmap.width}×${bitmap.height}，耗时 ${screenshotElapsed}ms",
-                    )
-
                     MlKitChineseOcr.recognize(bitmap) { result ->
-                        result.onSuccess { text ->
-                            CapabilityState.publish("ML Kit 中文 OCR", text)
+                        result.onSuccess { recognition ->
+                            val snapshot = OcrSnapshot(
+                                observationId = observationId,
+                                capturedAtMillis = System.currentTimeMillis(),
+                                screenshotWidth = bitmap.width,
+                                screenshotHeight = bitmap.height,
+                                screenshotElapsedMillis = screenshotElapsed,
+                                recognitionElapsedMillis = recognition.elapsedMillis,
+                                lines = recognition.lines,
+                            )
+                            OcrState.publish(snapshot)
+                            CapabilityState.publish(
+                                "ML Kit 中文 OCR",
+                                snapshot.debugText(maxLines = 80),
+                            )
                         }.onFailure { error ->
                             CapabilityState.publish(
                                 "ML Kit 中文 OCR 失败",
@@ -247,7 +241,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     val elapsed = SystemClock.elapsedRealtime() - startedAt
                     CapabilityState.publish(
                         "Screenshot 失败",
-                        "errorCode=$errorCode, elapsed=${elapsed}ms",
+                        "errorCode=" + errorCode + ", elapsed=" + elapsed + "ms",
                     )
                 }
             },
