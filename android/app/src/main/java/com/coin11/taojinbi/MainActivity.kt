@@ -146,8 +146,8 @@ class MainActivity : Activity() {
 
         addSectionTitle(content, "OCR（v0.3）")
 
-        addButton(content, "OCR 当前外部页面") {
-            if (!TaojinbiAccessibilityService.scheduleScreenshotAndOcr(0L)) {
+        addButton(content, "2 秒后 OCR 当前前台") {
+            if (!TaojinbiAccessibilityService.scheduleScreenshotAndOcr(2000L)) {
                 CapabilityState.publish("OCR", "无障碍服务未连接。")
             }
         }
