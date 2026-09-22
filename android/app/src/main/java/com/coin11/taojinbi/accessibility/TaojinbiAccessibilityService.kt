@@ -14,11 +14,16 @@ import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.ObservationCollector
 import com.coin11.taojinbi.observation.ObserverState
 import com.coin11.taojinbi.ocr.MlKitChineseOcr
+import com.coin11.taojinbi.recognizer.PageRecognizer
+import com.coin11.taojinbi.recognizer.RecognitionSnapshot
+import com.coin11.taojinbi.recognizer.RecognitionState
+import com.coin11.taojinbi.recognizer.RulesLoader
 
 class TaojinbiAccessibilityService : AccessibilityService() {
 
     private val collector = ObservationCollector()
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var pageRecognizer: PageRecognizer
     private var lastCaptureAt = 0L
 
     private val captureRunnable = Runnable {
@@ -34,8 +39,22 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         }
 
+        val loadedRules = RulesLoader.load(this)
+        pageRecognizer = PageRecognizer(loadedRules.rules)
+        RecognitionState.configureRules(
+            source = loadedRules.source,
+            error = loadedRules.error,
+        )
+
         instance = this
-        CapabilityState.publish("Accessibility", "服务已连接。")
+        CapabilityState.publish(
+            "Accessibility",
+            buildString {
+                appendLine("服务已连接。")
+                append("Recognizer rules：${loadedRules.source}")
+                loadedRules.error?.let { append("；fallback=$it") }
+            },
+        )
         scheduleCapture()
     }
 
@@ -90,6 +109,19 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         runCatching {
             collector.collect(root)
         }.onSuccess { observation ->
+            val activityHint = ObserverState.latestWindowStateClassName
+            val recognition = pageRecognizer.recognize(
+                observation = observation,
+                activityHint = activityHint,
+            )
+            RecognitionState.publish(
+                RecognitionSnapshot(
+                    observationId = observation.id,
+                    recognizedAtMillis = System.currentTimeMillis(),
+                    activityHint = activityHint,
+                    result = recognition,
+                ),
+            )
             ObserverState.publish(observation)
         }.onFailure { error ->
             CapabilityState.publish("Observation 采集失败", error.stackTraceToString())

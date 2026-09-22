@@ -19,8 +19,7 @@ import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.NodeSnapshot
 import com.coin11.taojinbi.observation.Observation
 import com.coin11.taojinbi.observation.ObserverState
-import com.coin11.taojinbi.recognizer.PageRecognizer
-import com.coin11.taojinbi.recognizer.RulesLoader
+import com.coin11.taojinbi.recognizer.RecognitionState
 import com.coin11.taojinbi.shizuku.ShizukuBridge
 import rikka.shizuku.Shizuku
 import java.util.Date
@@ -78,12 +77,6 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = "淘金币 Android Page Recognizer"
-
-        val loadedRules = RulesLoader.load(this)
-        pageRecognizer = PageRecognizer(loadedRules.rules)
-        rulesSource = loadedRules.source
-        rulesError = loadedRules.error
-
         setContentView(buildContent())
 
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
@@ -347,24 +340,32 @@ class MainActivity : Activity() {
         if (observation == null) {
             recognitionOutput.text = buildString {
                 appendLine("Page：等待 Observation")
-                appendLine("Rules：$rulesSource")
-                rulesError?.let { append("Rules fallback：$it") }
+                appendLine("Rules：${RecognitionState.rulesSource}")
+                RecognitionState.rulesError?.let { append("Rules fallback：$it") }
             }.trimEnd()
             snapshotSummary.text = "暂无外部页面快照。"
             nodeDump.text = ""
             return
         }
 
-        val recognition = pageRecognizer.recognize(
-            observation = observation,
-            activityHint = ObserverState.latestWindowStateClassName,
-        )
-        recognitionOutput.text = buildString {
-            appendLine(recognition.debugText())
-            appendLine("Activity hint：${ObserverState.latestWindowStateClassName ?: "(none)"}")
-            appendLine("Rules：$rulesSource")
-            rulesError?.let { append("Rules fallback：$it") }
-        }.trimEnd()
+        val recognitionSnapshot = RecognitionState.latest
+        recognitionOutput.text = if (
+            recognitionSnapshot != null &&
+            recognitionSnapshot.observationId == observation.id
+        ) {
+            buildString {
+                appendLine(recognitionSnapshot.result.debugText())
+                appendLine("Activity hint：${recognitionSnapshot.activityHint ?: "(none)"}")
+                appendLine("Rules：${RecognitionState.rulesSource}")
+                RecognitionState.rulesError?.let { append("Rules fallback：$it") }
+            }.trimEnd()
+        } else {
+            buildString {
+                appendLine("Page：等待当前 Observation 的识别结果")
+                appendLine("Observation #${observation.id}")
+                appendLine("Rules：${RecognitionState.rulesSource}")
+            }.trimEnd()
+        }
 
         val capturedAt = DateFormat.format(
             "yyyy-MM-dd HH:mm:ss.SSS",
