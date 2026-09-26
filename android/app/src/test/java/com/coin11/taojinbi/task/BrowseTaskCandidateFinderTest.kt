@@ -51,12 +51,33 @@ class BrowseTaskCandidateFinderTest {
     fun findsCoinTaskEntry() {
         val observation = observation(
             node(0, "淘金币", 100, 100, 500, 200),
-            node(1, "2分钟快速赚", 700, 300, 1200, 420),
+            node(1, "赚更多金币", 700, 300, 1200, 420),
         )
 
         assertEquals(
-            "2分钟快速赚",
+            "赚更多金币",
             BrowseTaskCandidateFinder.findCoinTaskEntry(observation)?.text,
+        )
+    }
+
+    @Test
+    fun doesNotTreatPageEvidenceAsCoinTaskEntry() {
+        val observation = observation(
+            node(0, "2分钟快速赚", 700, 300, 1200, 420),
+        )
+
+        assertNull(BrowseTaskCandidateFinder.findCoinTaskEntry(observation))
+    }
+
+    @Test
+    fun findsSignCoinEntrySeparately() {
+        val observation = observation(
+            node(0, "签到领金币", 700, 300, 1200, 420),
+        )
+
+        assertEquals(
+            "签到领金币",
+            BrowseTaskCandidateFinder.findSignCoinEntry(observation)?.text,
         )
     }
 

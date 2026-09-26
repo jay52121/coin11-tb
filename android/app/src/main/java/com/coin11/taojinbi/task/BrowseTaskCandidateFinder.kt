@@ -46,19 +46,30 @@ object BrowseTaskCandidateFinder {
     )
 
     private val coinEntryWords = listOf(
-        "2分钟快速赚",
         "赚更多金币",
-        "今日速赚",
-        "快速赚",
+        "赚金币",
+    )
+
+    private val signCoinWords = listOf(
+        "签到领金币",
     )
 
     fun findCoinTaskEntry(observation: Observation): NodeSnapshot? =
+        findFirstByWords(observation, coinEntryWords)
+
+    fun findSignCoinEntry(observation: Observation): NodeSnapshot? =
+        findFirstByWords(observation, signCoinWords)
+
+    private fun findFirstByWords(
+        observation: Observation,
+        words: List<String>,
+    ): NodeSnapshot? =
         observation.nodes
             .asSequence()
             .filter { it.enabled && hasUsableBounds(it.bounds) }
             .mapNotNull { node ->
                 val text = nodeText(node)
-                val rank = coinEntryWords.indexOfFirst { text.contains(it) }
+                val rank = words.indexOfFirst { text.contains(it) }
                 if (rank < 0) null else Triple(rank, node.bounds.top, node)
             }
             .sortedWith(compareBy<Triple<Int, Int, NodeSnapshot>> { it.first }.thenBy { it.second })
