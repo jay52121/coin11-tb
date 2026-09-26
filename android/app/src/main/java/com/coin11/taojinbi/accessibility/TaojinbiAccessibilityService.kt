@@ -221,6 +221,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 observation = observation,
                 pageType = recognition.pageType,
             )
+            runQueuedCoinMainlineIfReady(
+                observation = observation,
+                pageType = recognition.pageType,
+            )
             runPendingActionIfReady(
                 observationId = observation.id,
                 packageName = observation.packageName,
@@ -1021,6 +1025,41 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             append(skippedCoinTasks)
         }
 
+    private fun runQueuedCoinMainlineIfReady(
+        observation: com.coin11.taojinbi.observation.Observation,
+        pageType: PageType,
+    ) {
+        val until = queuedCoinMainlineUntilMillis
+        if (until <= 0L) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (now > until) {
+            queuedCoinMainlineUntilMillis = 0L
+            Log.w(ONE_TASK_TAG, "queued coin mainline expired")
+            return
+        }
+
+        if (
+            !ObserverState.latestObservationValid ||
+            (pageType != PageType.COIN_HOME &&
+                pageType != PageType.DAILY_TASK_LIST)
+        ) {
+            return
+        }
+
+        queuedCoinMainlineUntilMillis = 0L
+        val result = startCoinMainline()
+        Log.i(
+            ONE_TASK_TAG,
+            "queued coin mainline start on Observation #" +
+                observation.id +
+                " page=" + pageType.wireName +
+                " -> " + result,
+        )
+    }
+
     private fun runPendingActionIfReady(
         observationId: Long,
         packageName: String?,
@@ -1222,9 +1261,13 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val MAX_TASK_LIST_SCROLLS = 4
         private const val MAX_MAINLINE_TASK_LIST_SCROLLS = 8
         private const val MAX_RETURN_BACKS = 5
+        private const val DEBUG_MAINLINE_QUEUE_TTL_MS = 30_000L
 
         @Volatile
         private var instance: TaojinbiAccessibilityService? = null
+
+        @Volatile
+        private var queuedCoinMainlineUntilMillis = 0L
 
         fun isRunning(): Boolean = instance != null
 
@@ -1280,9 +1323,27 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             instance?.startOneBrowseTask()
                 ?: "rejected run_one_browse_task: accessibility service not connected"
 
-        fun debugStartCoinMainline(): String =
-            instance?.startCoinMainline()
-                ?: "rejected run_coin_mainline: accessibility service not connected"
+        fun debugQueueCoinMainline(): String {
+            val service = instance
+            val observation = ObserverState.latestExternalObservation
+            val recognition = RecognitionState.latest
+            if (
+                service != null &&
+                observation != null &&
+                ObserverState.latestObservationValid &&
+                recognition?.observationId == observation.id &&
+                (
+                    recognition.result.pageType == PageType.COIN_HOME ||
+                        recognition.result.pageType == PageType.DAILY_TASK_LIST
+                )
+            ) {
+                return service.startCoinMainline()
+            }
+
+            queuedCoinMainlineUntilMillis =
+                System.currentTimeMillis() + DEBUG_MAINLINE_QUEUE_TTL_MS
+            return "accepted run_coin_mainline queued awaiting service/coin page"
+        }
 
         private fun armActionOnNextCoinObservation(type: PendingActionType): Boolean {
             if (instance == null) {
