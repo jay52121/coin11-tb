@@ -10,41 +10,46 @@ import org.junit.Test
 class TaskPageContextTest {
 
     @Test
-    fun reinterpretsHomeAsBrowseOnlyInsideBrowseContextWithTaskSignal() {
-        val observation = observation("浏览5秒")
-
+    fun waitingEntryNeedsBrowseSignalToReinterpretHome() {
         assertEquals(
             PageType.TAOBAO_BROWSE_TASK,
             TaskPageContext.effectiveBrowsePageType(
                 rawPageType = PageType.TAOBAO_HOME,
-                observation = observation,
-                browseContextActive = true,
+                observation = observation("浏览5秒"),
+                phase = BrowseContextPhase.WAITING_ENTRY,
             ),
         )
-    }
-
-    @Test
-    fun keepsRealHomeAsHomeWithoutBrowseSignal() {
-        val observation = observation("搜索栏", "淘宝农场")
 
         assertEquals(
             PageType.TAOBAO_HOME,
             TaskPageContext.effectiveBrowsePageType(
                 rawPageType = PageType.TAOBAO_HOME,
-                observation = observation,
-                browseContextActive = true,
+                observation = observation("搜索栏", "淘宝农场"),
+                phase = BrowseContextPhase.WAITING_ENTRY,
             ),
         )
     }
 
     @Test
-    fun doesNotOverrideTaskList() {
+    fun confirmedBrowseContextOwnsHomeLikeRawPage() {
+        assertEquals(
+            PageType.TAOBAO_BROWSE_TASK,
+            TaskPageContext.effectiveBrowsePageType(
+                rawPageType = PageType.TAOBAO_HOME,
+                observation = observation("搜索栏", "淘宝农场"),
+                phase = BrowseContextPhase.ACTIVE,
+            ),
+        )
+    }
+
+    @Test
+    fun doesNotOverrideTerminalTaskList() {
         assertEquals(
             PageType.DAILY_TASK_LIST,
             TaskPageContext.effectiveBrowsePageType(
                 rawPageType = PageType.DAILY_TASK_LIST,
                 observation = observation("浏览15秒"),
-                browseContextActive = true,
+                phase = BrowseContextPhase.ACTIVE,
             ),
         )
     }

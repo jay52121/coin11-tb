@@ -25,6 +25,7 @@ import com.coin11.taojinbi.recognizer.PageType
 import com.coin11.taojinbi.recognizer.RecognitionSnapshot
 import com.coin11.taojinbi.recognizer.RecognitionState
 import com.coin11.taojinbi.recognizer.RulesLoader
+import com.coin11.taojinbi.task.BrowseContextPhase
 import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskKind
@@ -364,13 +365,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         observation: com.coin11.taojinbi.observation.Observation,
         pageType: PageType,
     ) {
-        val browseContextActive =
-            oneBrowseStage == OneBrowseStage.WAITING_BROWSE_PAGE ||
-                oneBrowseStage == OneBrowseStage.BROWSING
+        val browseContextPhase = when (oneBrowseStage) {
+            OneBrowseStage.WAITING_BROWSE_PAGE -> BrowseContextPhase.WAITING_ENTRY
+            OneBrowseStage.BROWSING -> BrowseContextPhase.ACTIVE
+            else -> BrowseContextPhase.NONE
+        }
         val effectivePageType = TaskPageContext.effectiveBrowsePageType(
             rawPageType = pageType,
             observation = observation,
-            browseContextActive = browseContextActive,
+            phase = browseContextPhase,
         )
         if (effectivePageType != pageType) {
             oneBrowseLog(

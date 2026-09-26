@@ -3,6 +3,12 @@ package com.coin11.taojinbi.task
 import com.coin11.taojinbi.observation.Observation
 import com.coin11.taojinbi.recognizer.PageType
 
+enum class BrowseContextPhase {
+    NONE,
+    WAITING_ENTRY,
+    ACTIVE,
+}
+
 object TaskPageContext {
 
     private val browseSignals = listOf(
@@ -19,9 +25,9 @@ object TaskPageContext {
     fun effectiveBrowsePageType(
         rawPageType: PageType,
         observation: Observation,
-        browseContextActive: Boolean,
+        phase: BrowseContextPhase,
     ): PageType {
-        if (!browseContextActive || rawPageType == PageType.TAOBAO_BROWSE_TASK) {
+        if (phase == BrowseContextPhase.NONE || rawPageType == PageType.TAOBAO_BROWSE_TASK) {
             return rawPageType
         }
 
@@ -34,6 +40,10 @@ object TaskPageContext {
 
         if (observation.packageName != TAOBAO_PACKAGE) {
             return rawPageType
+        }
+
+        if (phase == BrowseContextPhase.ACTIVE) {
+            return PageType.TAOBAO_BROWSE_TASK
         }
 
         val texts = observation.nodes
