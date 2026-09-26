@@ -29,7 +29,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "run_one_browse_task" ->
                 TaojinbiAccessibilityService.debugStartOneBrowseTask()
             "run_coin_mainline" -> {
-                val queued = TaojinbiAccessibilityService.debugQueueCoinMainline()
+                val queued = TaojinbiAccessibilityService.debugQueueCoinMainline(context)
                 if (queued.contains("queued")) {
                     val opened = openCoinHome(context)
                     if (opened) {

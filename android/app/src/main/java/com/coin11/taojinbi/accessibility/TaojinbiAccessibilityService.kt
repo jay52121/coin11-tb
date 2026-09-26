@@ -2,6 +2,7 @@ package com.coin11.taojinbi.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
@@ -1029,14 +1030,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         observation: com.coin11.taojinbi.observation.Observation,
         pageType: PageType,
     ) {
-        val until = queuedCoinMainlineUntilMillis
+        val prefs = getSharedPreferences(DEBUG_REQUEST_PREFS, Context.MODE_PRIVATE)
+        val until = prefs.getLong(DEBUG_COIN_MAINLINE_UNTIL, 0L)
         if (until <= 0L) {
             return
         }
 
         val now = System.currentTimeMillis()
         if (now > until) {
-            queuedCoinMainlineUntilMillis = 0L
+            prefs.edit().remove(DEBUG_COIN_MAINLINE_UNTIL).apply()
             Log.w(ONE_TASK_TAG, "queued coin mainline expired")
             return
         }
@@ -1049,7 +1051,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             return
         }
 
-        queuedCoinMainlineUntilMillis = 0L
+        prefs.edit().remove(DEBUG_COIN_MAINLINE_UNTIL).apply()
         val result = startCoinMainline()
         Log.i(
             ONE_TASK_TAG,
@@ -1262,12 +1264,11 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val MAX_MAINLINE_TASK_LIST_SCROLLS = 8
         private const val MAX_RETURN_BACKS = 5
         private const val DEBUG_MAINLINE_QUEUE_TTL_MS = 30_000L
+        private const val DEBUG_REQUEST_PREFS = "debug_run_requests"
+        private const val DEBUG_COIN_MAINLINE_UNTIL = "coin_mainline_until"
 
         @Volatile
         private var instance: TaojinbiAccessibilityService? = null
-
-        @Volatile
-        private var queuedCoinMainlineUntilMillis = 0L
 
         fun isRunning(): Boolean = instance != null
 
@@ -1323,7 +1324,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             instance?.startOneBrowseTask()
                 ?: "rejected run_one_browse_task: accessibility service not connected"
 
-        fun debugQueueCoinMainline(): String {
+        fun debugQueueCoinMainline(context: Context): String {
             val service = instance
             val observation = ObserverState.latestExternalObservation
             val recognition = RecognitionState.latest
@@ -1340,8 +1341,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 return service.startCoinMainline()
             }
 
-            queuedCoinMainlineUntilMillis =
-                System.currentTimeMillis() + DEBUG_MAINLINE_QUEUE_TTL_MS
+            context.getSharedPreferences(
+                DEBUG_REQUEST_PREFS,
+                Context.MODE_PRIVATE,
+            ).edit()
+                .putLong(
+                    DEBUG_COIN_MAINLINE_UNTIL,
+                    System.currentTimeMillis() + DEBUG_MAINLINE_QUEUE_TTL_MS,
+                )
+                .apply()
             return "accepted run_coin_mainline queued awaiting service/coin page"
         }
 
