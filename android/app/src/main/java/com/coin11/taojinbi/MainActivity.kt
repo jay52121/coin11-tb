@@ -172,26 +172,26 @@ class MainActivity : Activity() {
         }
 
         addButton(content, "淘金币 → 2 秒后截图 + 中文 OCR") {
+            scheduleAccessibilityTest {
+                TaojinbiAccessibilityService.scheduleScreenshotAndOcr(2200L)
+            }
+        }
+
+        addButton(content, "淘金币 → coin_home 后 Swipe Up") {
             scheduleAccessibilityTest(
-                scheduler = TaojinbiAccessibilityService::scheduleScreenshotAndOcr,
+                scheduler = TaojinbiAccessibilityService::armSwipeUpOnNextCoinObservation,
             )
         }
 
-        addButton(content, "淘金币 → 2 秒后 Swipe Up") {
+        addButton(content, "淘金币 → coin_home 后 Tap 屏幕中心") {
             scheduleAccessibilityTest(
-                scheduler = TaojinbiAccessibilityService::scheduleSwipeUp,
+                scheduler = TaojinbiAccessibilityService::armTapCenterOnNextCoinObservation,
             )
         }
 
-        addButton(content, "淘金币 → 2 秒后 Tap 屏幕中心") {
+        addButton(content, "淘金币 → coin_home 后 Global Back") {
             scheduleAccessibilityTest(
-                scheduler = TaojinbiAccessibilityService::scheduleTapCenter,
-            )
-        }
-
-        addButton(content, "淘金币 → 2 秒后 Global Back") {
-            scheduleAccessibilityTest(
-                scheduler = TaojinbiAccessibilityService::scheduleBack,
+                scheduler = TaojinbiAccessibilityService::armBackOnNextCoinObservation,
             )
         }
 
@@ -288,7 +288,7 @@ class MainActivity : Activity() {
     }
 
     private fun scheduleAccessibilityTest(
-        scheduler: (Long) -> Boolean,
+        scheduler: () -> Boolean,
     ) {
         if (!TaojinbiAccessibilityService.isRunning()) {
             CapabilityState.publish(
@@ -298,7 +298,7 @@ class MainActivity : Activity() {
             return
         }
 
-        val scheduled = scheduler(2200L)
+        val scheduled = scheduler()
         if (!scheduled) {
             CapabilityState.publish(
                 "Accessibility 测试",

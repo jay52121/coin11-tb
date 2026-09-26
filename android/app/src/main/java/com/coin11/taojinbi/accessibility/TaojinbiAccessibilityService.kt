@@ -6,10 +6,14 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Process
+import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import com.coin11.taojinbi.actions.AccessibilityActionExecutor
 import com.coin11.taojinbi.actions.ActionResult
+import com.coin11.taojinbi.actions.PendingActionState
+import com.coin11.taojinbi.actions.PendingActionType
 import com.coin11.taojinbi.capability.CapabilityState
 import com.coin11.taojinbi.observation.ObservationCollector
 import com.coin11.taojinbi.observation.ObserverState
@@ -17,6 +21,7 @@ import com.coin11.taojinbi.ocr.MlKitChineseOcr
 import com.coin11.taojinbi.ocr.OcrSnapshot
 import com.coin11.taojinbi.ocr.OcrState
 import com.coin11.taojinbi.recognizer.PageRecognizer
+import com.coin11.taojinbi.recognizer.PageType
 import com.coin11.taojinbi.recognizer.RecognitionSnapshot
 import com.coin11.taojinbi.recognizer.RecognitionState
 import com.coin11.taojinbi.recognizer.RulesLoader
@@ -28,6 +33,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private lateinit var pageRecognizer: PageRecognizer
     private lateinit var actionExecutor: AccessibilityActionExecutor
     private var lastCaptureAt = 0L
+    private val serviceInstanceToken = Integer.toHexString(System.identityHashCode(this))
 
     private val captureRunnable = Runnable {
         captureCurrentWindow()
@@ -51,10 +57,16 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         )
 
         instance = this
+        Log.i(
+            TAG,
+            "onServiceConnected instance=" + serviceInstanceToken +
+                " pid=" + Process.myPid() +
+                " pending=" + PendingActionState.describe(),
+        )
         CapabilityState.publish(
             "Accessibility",
             buildString {
-                appendLine("服务已连接。")
+                appendLine("服务已连接。instance=" + serviceInstanceToken + " pid=" + Process.myPid())
                 append("Recognizer rules：${loadedRules.source}")
                 loadedRules.error?.let { append("；fallback=$it") }
             },
@@ -85,7 +97,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         if (instance === this) {
             instance = null
         }
-        CapabilityState.publish("Accessibility", "服务已销毁。")
+        val detail =
+            "instance=" + serviceInstanceToken +
+                " pid=" + Process.myPid() +
+                " pending=" + PendingActionState.describe()
+        Log.w(TAG, "onDestroy " + detail)
+        CapabilityState.publish("Accessibility", "服务已销毁。" + detail)
         super.onDestroy()
     }
 
@@ -127,8 +144,37 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 ),
             )
             ObserverState.publish(observation)
+            runPendingActionIfReady(
+                observationId = observation.id,
+                packageName = observation.packageName,
+                pageType = recognition.pageType,
+            )
         }.onFailure { error ->
             CapabilityState.publish("Observation 采集失败", error.stackTraceToString())
+        }
+    }
+
+    private fun runPendingActionIfReady(
+        observationId: Long,
+        packageName: String?,
+        pageType: PageType,
+    ) {
+        val request = PendingActionState.consumeIf { pending ->
+            pending.targetPackage == packageName &&
+                pageType == PageType.COIN_HOME
+        } ?: return
+
+        CapabilityState.publish(
+            "Action 测试",
+            "Observation #" + observationId +
+                " / " + pageType.wireName +
+                "，执行 #" + request.id + " " + request.type,
+        )
+
+        when (request.type) {
+            PendingActionType.TAP_CENTER -> tapCenter()
+            PendingActionType.SWIPE_UP -> swipeUp()
+            PendingActionType.BACK -> globalBack()
         }
     }
 
@@ -276,6 +322,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        private const val TAG = "TaojinbiAccessibility"
+        private const val TAOBAO_PACKAGE = "com.taobao.taobao"
         private const val MIN_CAPTURE_INTERVAL_MS = 350L
         private const val EVENT_SETTLE_MS = 120L
 
@@ -284,23 +332,30 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         fun isRunning(): Boolean = instance != null
 
-        fun scheduleTapCenter(delayMs: Long = 1800L): Boolean =
-            instance?.let { service ->
-                service.schedule("Tap 测试", delayMs, service::tapCenter)
-                true
-            } ?: false
+        private fun armActionOnNextCoinObservation(type: PendingActionType): Boolean {
+            if (instance == null) {
+                return false
+            }
 
-        fun scheduleSwipeUp(delayMs: Long = 1800L): Boolean =
-            instance?.let { service ->
-                service.schedule("Swipe 测试", delayMs, service::swipeUp)
-                true
-            } ?: false
+            val request = PendingActionState.arm(
+                type = type,
+                targetPackage = TAOBAO_PACKAGE,
+            )
+            CapabilityState.publish(
+                "Action 测试",
+                "已等待下一次 coin_home Observation：#" + request.id + " " + request.type,
+            )
+            return true
+        }
 
-        fun scheduleBack(delayMs: Long = 1800L): Boolean =
-            instance?.let { service ->
-                service.schedule("Back 测试", delayMs, service::globalBack)
-                true
-            } ?: false
+        fun armTapCenterOnNextCoinObservation(): Boolean =
+            armActionOnNextCoinObservation(PendingActionType.TAP_CENTER)
+
+        fun armSwipeUpOnNextCoinObservation(): Boolean =
+            armActionOnNextCoinObservation(PendingActionType.SWIPE_UP)
+
+        fun armBackOnNextCoinObservation(): Boolean =
+            armActionOnNextCoinObservation(PendingActionType.BACK)
 
         fun scheduleScreenshotAndOcr(delayMs: Long = 2200L): Boolean =
             instance?.let { service ->
