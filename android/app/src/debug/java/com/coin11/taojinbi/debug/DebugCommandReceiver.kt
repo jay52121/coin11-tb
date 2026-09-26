@@ -27,6 +27,8 @@ class DebugCommandReceiver : BroadcastReceiver() {
             }
             "run_one_browse_task" ->
                 TaojinbiAccessibilityService.debugStartOneBrowseTask()
+            "run_coin_mainline" ->
+                TaojinbiAccessibilityService.debugStartCoinMainline()
             "status" -> TaojinbiAccessibilityService.debugStatusText()
             else -> "unknown command=" + command
         }

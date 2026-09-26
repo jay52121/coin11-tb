@@ -26,6 +26,9 @@ import com.coin11.taojinbi.recognizer.RecognitionSnapshot
 import com.coin11.taojinbi.recognizer.RecognitionState
 import com.coin11.taojinbi.recognizer.RulesLoader
 import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
+import com.coin11.taojinbi.task.CoinTaskCandidateFinder
+import com.coin11.taojinbi.task.CoinTaskKind
+import com.coin11.taojinbi.task.TaskPageContext
 
 class TaojinbiAccessibilityService : AccessibilityService() {
 
@@ -45,6 +48,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         WAITING_TASK_LIST,
         FINDING_TASK,
         WAITING_BROWSE_PAGE,
+        WAITING_REWARD_RESULT,
         BROWSING,
         RETURNING,
         DONE,
@@ -66,6 +70,11 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var oneBrowseTaskDescription = ""
     private var oneBrowseReturnShouldSucceed = true
     private var oneBrowseLastMessage = "idle"
+    private var coinMainlineMode = false
+    private val handledCoinTaskKeys = linkedSetOf<String>()
+    private var currentCoinTaskKey = ""
+    private var supportedCoinTasksCompleted = 0
+    private var skippedCoinTasks = 0
 
     private val oneBrowseTick = object : Runnable {
         override fun run() {
@@ -241,6 +250,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             ?: return "rejected no matching recognition"
 
         resetOneBrowseState()
+        coinMainlineMode = false
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseLog(
             "start Observation #" + observation.id +
@@ -258,13 +268,64 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
             PageType.DAILY_TASK_LIST -> {
                 oneBrowseStage = OneBrowseStage.FINDING_TASK
-                if (findAndClickBrowseTask(observation)) {
+                if (findAndClickNextTask(observation)) {
                     "accepted run_one_browse_task from daily_task_list"
                 } else if (oneBrowseStage == OneBrowseStage.FINDING_TASK) {
                     "accepted run_one_browse_task; searching task list"
                 } else {
                     "rejected no browse task candidate"
                 }
+            }
+
+            else -> {
+                oneBrowseStage = OneBrowseStage.FAILED
+                oneBrowseLastMessage =
+                    "unsupported start page=" + recognition.result.pageType.wireName
+                "rejected start page=" + recognition.result.pageType.wireName
+            }
+        }
+    }
+
+    private fun startCoinMainline(): String {
+        if (
+            oneBrowseStage != OneBrowseStage.IDLE &&
+            oneBrowseStage != OneBrowseStage.DONE &&
+            oneBrowseStage != OneBrowseStage.FAILED
+        ) {
+            return "rejected busy stage=" + oneBrowseStage
+        }
+
+        val observation = ObserverState.latestExternalObservation
+            ?: return "rejected no Observation"
+        if (!ObserverState.latestObservationValid) {
+            return "rejected Observation invalid"
+        }
+
+        val recognition = RecognitionState.latest
+            ?.takeIf { it.observationId == observation.id }
+            ?: return "rejected no matching recognition"
+
+        resetOneBrowseState()
+        coinMainlineMode = true
+        oneBrowseStartedAtMillis = System.currentTimeMillis()
+        oneBrowseLog(
+            "v0.5 mainline start Observation #" + observation.id +
+                " page=" + recognition.result.pageType.wireName,
+        )
+
+        return when (recognition.result.pageType) {
+            PageType.COIN_HOME -> {
+                oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
+                oneBrowseStageDeadlineMillis =
+                    System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
+                enterTaskListForOneBrowse(observation)
+                "accepted run_coin_mainline from coin_home"
+            }
+
+            PageType.DAILY_TASK_LIST -> {
+                oneBrowseStage = OneBrowseStage.FINDING_TASK
+                findAndClickNextTask(observation)
+                "accepted run_coin_mainline from daily_task_list"
             }
 
             else -> {
@@ -292,12 +353,33 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseTaskDescription = ""
         oneBrowseReturnShouldSucceed = true
         oneBrowseLastMessage = "idle"
+        coinMainlineMode = false
+        handledCoinTaskKeys.clear()
+        currentCoinTaskKey = ""
+        supportedCoinTasksCompleted = 0
+        skippedCoinTasks = 0
     }
 
     private fun onOneBrowseObservation(
         observation: com.coin11.taojinbi.observation.Observation,
         pageType: PageType,
     ) {
+        val browseContextActive =
+            oneBrowseStage == OneBrowseStage.WAITING_BROWSE_PAGE ||
+                oneBrowseStage == OneBrowseStage.BROWSING
+        val effectivePageType = TaskPageContext.effectiveBrowsePageType(
+            rawPageType = pageType,
+            observation = observation,
+            browseContextActive = browseContextActive,
+        )
+        if (effectivePageType != pageType) {
+            oneBrowseLog(
+                "业务上下文 page=" + effectivePageType.wireName +
+                    " rawPageType=" + pageType.wireName +
+                    " Observation #" + observation.id,
+            )
+        }
+
         when (oneBrowseStage) {
             OneBrowseStage.IDLE,
             OneBrowseStage.DONE,
@@ -308,7 +390,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 if (pageType == PageType.DAILY_TASK_LIST) {
                     oneBrowseStage = OneBrowseStage.FINDING_TASK
                     oneBrowseLog("进入 daily_task_list Observation #" + observation.id)
-                    findAndClickBrowseTask(observation)
+                    findAndClickNextTask(observation)
                 } else if (System.currentTimeMillis() > oneBrowseStageDeadlineMillis) {
                     failOneBrowse("进入任务列表超时，最后 page=" + pageType.wireName)
                 } else if (pageType == PageType.COIN_HOME) {
@@ -318,14 +400,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
             OneBrowseStage.FINDING_TASK -> {
                 if (pageType == PageType.DAILY_TASK_LIST) {
-                    findAndClickBrowseTask(observation)
+                    findAndClickNextTask(observation)
                 } else if (pageType == PageType.COIN_HOME) {
                     enterTaskListForOneBrowse(observation)
                 }
             }
 
             OneBrowseStage.WAITING_BROWSE_PAGE -> {
-                when (pageType) {
+                when (effectivePageType) {
                     PageType.TAOBAO_BROWSE_TASK -> beginOneBrowse()
                     PageType.TASK_DONE -> startOneBrowseReturn(
                         shouldSucceed = true,
@@ -343,7 +425,39 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         if (System.currentTimeMillis() > oneBrowseStageDeadlineMillis) {
                             startOneBrowseReturn(
                                 shouldSucceed = false,
-                                reason = "点击后未进入浏览页，最后 page=" + pageType.wireName,
+                                reason = "点击后未进入浏览页，最后 raw=" + pageType.wireName,
+                            )
+                        }
+                    }
+                }
+            }
+
+            OneBrowseStage.WAITING_REWARD_RESULT -> {
+                when (pageType) {
+                    PageType.DAILY_TASK_LIST -> finishCurrentTaskOnDailyList(
+                        observation = observation,
+                        success = true,
+                        message = "奖励动作完成",
+                    )
+                    PageType.COIN_HOME -> {
+                        oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
+                        oneBrowseStageDeadlineMillis =
+                            System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
+                        enterTaskListForOneBrowse(observation)
+                    }
+                    PageType.EXTERNAL_APP,
+                    PageType.QUIZ,
+                    PageType.SHOP_SUBSCRIBE_TASK,
+                    PageType.GOOD_SHOP_PAGE,
+                    -> startOneBrowseReturn(
+                        shouldSucceed = false,
+                        reason = "奖励动作进入非目标页 " + pageType.wireName,
+                    )
+                    else -> {
+                        if (System.currentTimeMillis() > oneBrowseStageDeadlineMillis) {
+                            startOneBrowseReturn(
+                                shouldSucceed = false,
+                                reason = "奖励动作结果超时 raw=" + pageType.wireName,
                             )
                         }
                     }
@@ -351,12 +465,13 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             }
 
             OneBrowseStage.BROWSING -> {
-                when (pageType) {
+                when (effectivePageType) {
                     PageType.TASK_DONE -> startOneBrowseReturn(
                         shouldSucceed = true,
                         reason = "PageType=task_done",
                     )
-                    PageType.DAILY_TASK_LIST -> completeOneBrowse(
+                    PageType.DAILY_TASK_LIST -> finishCurrentTaskOnDailyList(
+                        observation = observation,
                         success = true,
                         message = "浏览任务自动回到 daily_task_list",
                     )
@@ -374,7 +489,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
             OneBrowseStage.RETURNING -> {
                 when (pageType) {
-                    PageType.DAILY_TASK_LIST -> completeOneBrowse(
+                    PageType.DAILY_TASK_LIST -> finishCurrentTaskOnDailyList(
+                        observation = observation,
                         success = oneBrowseReturnShouldSucceed,
                         message = if (oneBrowseReturnShouldSucceed) {
                             "已返回 daily_task_list"
@@ -549,35 +665,130 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         return true
     }
 
-    private fun findAndClickBrowseTask(
+    private fun findAndClickNextTask(
         observation: com.coin11.taojinbi.observation.Observation,
     ): Boolean {
-        val candidate = BrowseTaskCandidateFinder.findBrowseTask(observation)
-        if (candidate != null) {
-            oneBrowseTaskDescription =
-                candidate.buttonText + " | " + candidate.contextText.take(120)
-            oneBrowseStage = OneBrowseStage.WAITING_BROWSE_PAGE
-            oneBrowseStageDeadlineMillis =
-                System.currentTimeMillis() + ENTER_BROWSE_TIMEOUT_MS
+        if (!coinMainlineMode) {
+            val candidate = BrowseTaskCandidateFinder.findBrowseTask(observation)
+            if (candidate != null) {
+                currentCoinTaskKey =
+                    (candidate.buttonText + "|" + candidate.contextText)
+                        .replace(Regex("\\s+"), "")
+                        .take(180)
+                oneBrowseTaskDescription =
+                    candidate.buttonText + " | " + candidate.contextText.take(120)
+                oneBrowseStage = OneBrowseStage.WAITING_BROWSE_PAGE
+                oneBrowseStageDeadlineMillis =
+                    System.currentTimeMillis() + ENTER_BROWSE_TIMEOUT_MS
+                oneBrowseLog(
+                    "点击浏览任务 " + oneBrowseTaskDescription +
+                        " bounds=" + candidate.bounds,
+                )
+                return tapBoundsForOneBrowse(candidate.bounds, "one_task_candidate")
+            }
+
+            if (oneBrowseTaskListScrolls >= MAX_TASK_LIST_SCROLLS) {
+                failOneBrowse("任务列表连续下翻后仍没有安全的普通浏览任务候选")
+                return false
+            }
+
+            oneBrowseTaskListScrolls += 1
             oneBrowseLog(
-                "点击浏览任务 " + oneBrowseTaskDescription +
-                    " bounds=" + candidate.bounds,
+                "当前屏无普通浏览任务候选，下翻 " +
+                    oneBrowseTaskListScrolls + "/" + MAX_TASK_LIST_SCROLLS,
             )
-            return tapBoundsForOneBrowse(candidate.bounds, "one_task_candidate")
+            swipeTaskListForOneBrowse()
+            return false
         }
 
-        if (oneBrowseTaskListScrolls >= MAX_TASK_LIST_SCROLLS) {
-            failOneBrowse("任务列表连续下翻后仍没有安全的普通浏览任务候选")
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation,
+            handledKeys = handledCoinTaskKeys,
+        )
+
+        if (candidate != null) {
+            currentCoinTaskKey = candidate.key
+            oneBrowseTaskDescription =
+                candidate.actionText + " | " + candidate.contextText.take(120)
+            oneBrowseTaskListScrolls = 0
+
+            when (candidate.kind) {
+                CoinTaskKind.BROWSE -> {
+                    oneBrowseStage = OneBrowseStage.WAITING_BROWSE_PAGE
+                    oneBrowseStageDeadlineMillis =
+                        System.currentTimeMillis() + ENTER_BROWSE_TIMEOUT_MS
+                    oneBrowseLog(
+                        "主线点击浏览任务 " + oneBrowseTaskDescription +
+                            " bounds=" + candidate.bounds,
+                    )
+                }
+
+                CoinTaskKind.REWARD -> {
+                    oneBrowseStage = OneBrowseStage.WAITING_REWARD_RESULT
+                    oneBrowseStageDeadlineMillis =
+                        System.currentTimeMillis() + REWARD_RESULT_TIMEOUT_MS
+                    oneBrowseLog(
+                        "主线点击奖励 " + oneBrowseTaskDescription +
+                            " bounds=" + candidate.bounds,
+                    )
+                }
+            }
+
+            return tapBoundsForOneBrowse(candidate.bounds, "coin_mainline_candidate")
+        }
+
+        if (oneBrowseTaskListScrolls >= MAX_MAINLINE_TASK_LIST_SCROLLS) {
+            completeOneBrowse(
+                success = true,
+                message =
+                    "主线安全任务扫描完成 completed=" +
+                        supportedCoinTasksCompleted +
+                        " skipped=" + skippedCoinTasks,
+            )
             return false
         }
 
         oneBrowseTaskListScrolls += 1
         oneBrowseLog(
-            "当前屏无普通浏览任务候选，下翻 " +
-                oneBrowseTaskListScrolls + "/" + MAX_TASK_LIST_SCROLLS,
+            "主线当前屏无新的安全任务，下翻 " +
+                oneBrowseTaskListScrolls + "/" + MAX_MAINLINE_TASK_LIST_SCROLLS,
         )
         swipeTaskListForOneBrowse()
         return false
+    }
+
+    private fun finishCurrentTaskOnDailyList(
+        observation: com.coin11.taojinbi.observation.Observation,
+        success: Boolean,
+        message: String,
+    ) {
+        if (currentCoinTaskKey.isNotBlank()) {
+            handledCoinTaskKeys += currentCoinTaskKey
+        }
+
+        if (!coinMainlineMode) {
+            completeOneBrowse(success = success, message = message)
+            return
+        }
+
+        if (success) {
+            supportedCoinTasksCompleted += 1
+        } else {
+            skippedCoinTasks += 1
+        }
+
+        oneBrowseTaskListScrolls = 0
+        oneBrowseBackCount = 0
+        oneBrowseTaskDescription = ""
+        currentCoinTaskKey = ""
+        oneBrowseStage = OneBrowseStage.FINDING_TASK
+        oneBrowseLog(
+            (if (success) "主线任务完成：" else "主线任务跳过：") +
+                message +
+                " completed=" + supportedCoinTasksCompleted +
+                " skipped=" + skippedCoinTasks,
+        )
+        findAndClickNextTask(observation)
     }
 
     private fun beginOneBrowse() {
@@ -799,6 +1010,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             append(oneBrowseTaskListScrolls)
             append(" backs=")
             append(oneBrowseBackCount)
+            append(" mode=")
+            append(if (coinMainlineMode) "coin_mainline" else "one_browse")
+            append(" completed=")
+            append(supportedCoinTasksCompleted)
+            append(" skipped=")
+            append(skippedCoinTasks)
         }
 
     private fun runPendingActionIfReady(
@@ -990,6 +1207,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         private const val ENTER_TASK_LIST_TIMEOUT_MS = 8_000L
         private const val ENTER_BROWSE_TIMEOUT_MS = 6_000L
+        private const val REWARD_RESULT_TIMEOUT_MS = 5_000L
         private const val BROWSE_DURATION_MS = 30_000L
         private const val BROWSE_FIRST_OCR_DELAY_MS = 8_000L
         private const val BROWSE_OCR_INTERVAL_MS = 2_000L
@@ -999,6 +1217,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val RETURN_ACTION_MIN_INTERVAL_MS = 900L
         private const val RETURN_BACK_SETTLE_MS = 450L
         private const val MAX_TASK_LIST_SCROLLS = 4
+        private const val MAX_MAINLINE_TASK_LIST_SCROLLS = 8
         private const val MAX_RETURN_BACKS = 5
 
         @Volatile
@@ -1057,6 +1276,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         fun debugStartOneBrowseTask(): String =
             instance?.startOneBrowseTask()
                 ?: "rejected run_one_browse_task: accessibility service not connected"
+
+        fun debugStartCoinMainline(): String =
+            instance?.startCoinMainline()
+                ?: "rejected run_coin_mainline: accessibility service not connected"
 
         private fun armActionOnNextCoinObservation(type: PendingActionType): Boolean {
             if (instance == null) {

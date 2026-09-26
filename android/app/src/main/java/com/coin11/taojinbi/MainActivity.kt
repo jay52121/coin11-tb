@@ -75,7 +75,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "淘金币 Android v0.4"
+        title = "淘金币 Android v0.5"
         setContentView(buildContent())
 
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
@@ -111,13 +111,13 @@ class MainActivity : Activity() {
         }
 
         content.addView(TextView(this).apply {
-            text = "淘金币 Android · 0.4 One Browse Task"
+            text = "淘金币 Android · 0.5 Coin Mainline"
             textSize = 22f
             setTypeface(typeface, Typeface.BOLD)
         })
 
         content.addView(TextView(this).apply {
-            text = "v0.4 只验证一条普通浏览任务闭环；完整 TaskEngine 仍未迁移。"
+            text = "v0.5 连续执行可安全确认的普通浏览任务和奖励领取；特殊任务与 Recovery 留到 v0.6。"
             textSize = 15f
             setPadding(0, dp(8), 0, dp(14))
         })
