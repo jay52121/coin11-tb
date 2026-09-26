@@ -58,6 +58,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var oneBrowseNextOcrAtMillis = 0L
     private var oneBrowseOcrInFlight = false
     private var oneBrowseEntryOcrInFlight = false
+    private var oneBrowseEntryClicked = false
     private var oneBrowseSignClaimed = false
     private var oneBrowseTaskListScrolls = 0
     private var oneBrowseBackCount = 0
@@ -283,6 +284,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseNextOcrAtMillis = 0L
         oneBrowseOcrInFlight = false
         oneBrowseEntryOcrInFlight = false
+        oneBrowseEntryClicked = false
         oneBrowseSignClaimed = false
         oneBrowseTaskListScrolls = 0
         oneBrowseBackCount = 0
@@ -398,6 +400,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         observation: com.coin11.taojinbi.observation.Observation,
         returning: Boolean = false,
     ): Boolean {
+        if (!returning && oneBrowseEntryClicked) {
+            return true
+        }
+
         val entry = BrowseTaskCandidateFinder.findCoinTaskEntry(observation)
         if (entry != null) {
             val label = (entry.text ?: entry.contentDescription ?: "赚金币").trim()
@@ -410,6 +416,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 (if (returning) "返回过程中点击任务入口 " else "点击任务入口 ") +
                     label + " " + entry.bounds,
             )
+            if (!returning) {
+                oneBrowseEntryClicked = true
+            }
             return tapBoundsForOneBrowse(entry.bounds, "one_task_entry")
         }
 
@@ -479,7 +488,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         val compact = line.text.replace(" ", "")
                         val rank = when {
                             compact.contains("赚更多金币") -> 0
-                            compact.contains("赚金币") -> 1
+                            compact == "赚金币" -> 1
                             else -> -1
                         }
                         if (rank < 0) null else rank to line
@@ -501,6 +510,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         "OCR点击任务入口 " + entryLine.text +
                             " " + entryLine.bounds,
                     )
+                    if (!returning) {
+                        oneBrowseEntryClicked = true
+                    }
                     tapBoundsForOneBrowse(
                         entryLine.bounds,
                         "one_task_entry_ocr",

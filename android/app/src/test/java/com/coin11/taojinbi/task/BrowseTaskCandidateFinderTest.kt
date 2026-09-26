@@ -70,6 +70,15 @@ class BrowseTaskCandidateFinderTest {
     }
 
     @Test
+    fun doesNotTreatCoinHomeHeadingAsEntry() {
+        val observation = observation(
+            node(0, "赚金币抵钱", 100, 200, 800, 300),
+        )
+
+        assertNull(BrowseTaskCandidateFinder.findCoinTaskEntry(observation))
+    }
+
+    @Test
     fun findsSignCoinEntrySeparately() {
         val observation = observation(
             node(0, "签到领金币", 700, 300, 1200, 420),
