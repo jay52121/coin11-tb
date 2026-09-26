@@ -25,6 +25,8 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "back" -> execute(command) {
                 TaojinbiAccessibilityService.debugBackNow()
             }
+            "run_one_browse_task" ->
+                TaojinbiAccessibilityService.debugStartOneBrowseTask()
             "status" -> TaojinbiAccessibilityService.debugStatusText()
             else -> "unknown command=" + command
         }

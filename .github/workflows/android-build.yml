@@ -47,6 +47,6 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: taojinbi-android-v0.3-debug
+          name: taojinbi-android-v0.4-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
