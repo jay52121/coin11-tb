@@ -144,6 +144,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 ),
             )
             ObserverState.publish(observation)
+            Log.i(
+                TAG,
+                "Observation #" + observation.id +
+                    " valid page=" + recognition.pageType.wireName +
+                    " package=" + (observation.packageName ?: "(null)"),
+            )
             runPendingActionIfReady(
                 observationId = observation.id,
                 packageName = observation.packageName,
@@ -188,7 +194,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             publishActionResult("Accessibility Tap", result)
         }
         if (queued) {
-            ObserverState.invalidate("tap(" + x + "," + y + ")")
+            val reason = "tap(" + x + "," + y + ")"
+            ObserverState.invalidate(reason)
+            Log.i(TAG, "Observation invalidated reason=" + reason)
         }
     }
 
@@ -209,6 +217,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
         if (queued) {
             ObserverState.invalidate("swipe")
+            Log.i(TAG, "Observation invalidated reason=swipe")
         }
     }
 
@@ -217,18 +226,18 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         publishActionResult("Accessibility Back", result)
         if (result.success) {
             ObserverState.invalidate("back")
+            Log.i(TAG, "Observation invalidated reason=back")
         }
     }
 
     private fun publishActionResult(label: String, result: ActionResult) {
-        CapabilityState.publish(
-            label,
-            if (result.success) {
-                "成功：" + result.detail
-            } else {
-                "失败：" + result.detail
-            },
-        )
+        val message = if (result.success) {
+            "成功：" + result.detail
+        } else {
+            "失败：" + result.detail
+        }
+        Log.i(TAG, label + " " + message)
+        CapabilityState.publish(label, message)
     }
 
     private fun screenshotAndOcr() {
@@ -331,6 +340,51 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private var instance: TaojinbiAccessibilityService? = null
 
         fun isRunning(): Boolean = instance != null
+
+        fun debugTapCenterNow(): Boolean =
+            instance?.let { service ->
+                service.tapCenter()
+                true
+            } ?: false
+
+        fun debugSwipeUpNow(): Boolean =
+            instance?.let { service ->
+                service.swipeUp()
+                true
+            } ?: false
+
+        fun debugBackNow(): Boolean =
+            instance?.let { service ->
+                service.globalBack()
+                true
+            } ?: false
+
+        fun debugStatusText(): String {
+            val observation = ObserverState.latestExternalObservation
+            val recognition = RecognitionState.latest
+            return buildString {
+                append("service=")
+                append(if (instance != null) "connected" else "disconnected")
+                instance?.let {
+                    append(" instance=")
+                    append(it.serviceInstanceToken)
+                    append(" pid=")
+                    append(Process.myPid())
+                }
+                append(" observation=")
+                append(observation?.id?.let { "#" + it } ?: "(none)")
+                append(" valid=")
+                append(ObserverState.latestObservationValid)
+                append(" package=")
+                append(observation?.packageName ?: "(null)")
+                append(" page=")
+                append(recognition?.result?.pageType?.wireName ?: "(none)")
+                ObserverState.invalidationReason?.let {
+                    append(" invalidation=")
+                    append(it)
+                }
+            }
+        }
 
         private fun armActionOnNextCoinObservation(type: PendingActionType): Boolean {
             if (instance == null) {
