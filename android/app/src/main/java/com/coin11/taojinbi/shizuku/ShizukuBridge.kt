@@ -23,6 +23,12 @@ object ShizukuBridge {
         }
     }
 
+    fun isReady(): Boolean =
+        runCatching {
+            Shizuku.pingBinder() &&
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+
     fun statusText(): String {
         if (!runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
             return "binder：未连接"

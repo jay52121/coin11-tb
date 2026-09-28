@@ -460,6 +460,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     }
 
     private fun startCoinMainline(targetUserId: Int): String {
+        if (!ShizukuBridge.isReady()) {
+            return "rejected run_coin_mainline: Shizuku unavailable or unauthorized"
+        }
+
         if (
             oneBrowseStage != OneBrowseStage.IDLE &&
             oneBrowseStage != OneBrowseStage.DONE &&
@@ -642,8 +646,18 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         }
                     }
                     PageType.COIN_HOME -> {
-                        oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
-                        enterTaskListForOneBrowse(observation)
+                        if (taskTransitionSettled()) {
+                            oneBrowseLog(
+                                "任务点击后 settle 完成仍为 coin_home，按Mac语义重新进入任务列表",
+                            )
+                            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                            enterTaskListForOneBrowse(observation)
+                        } else {
+                            oneBrowseLog(
+                                "忽略任务点击后2秒内 transient coin_home Observation #" +
+                                    observation.id,
+                            )
+                        }
                     }
                     PageType.TAOBAO_BROWSE_TASK -> beginOneBrowse()
                     PageType.TASK_DONE -> startOneBrowseReturn(
@@ -688,8 +702,18 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         }
                     }
                     PageType.COIN_HOME -> {
-                        oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
-                        enterTaskListForOneBrowse(observation)
+                        if (taskTransitionSettled()) {
+                            oneBrowseLog(
+                                "奖励点击后 settle 完成仍为 coin_home，重新进入任务列表",
+                            )
+                            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                            enterTaskListForOneBrowse(observation)
+                        } else {
+                            oneBrowseLog(
+                                "忽略奖励点击后2秒内 transient coin_home Observation #" +
+                                    observation.id,
+                            )
+                        }
                     }
                     PageType.EXTERNAL_APP -> {
                         if (!startExternalTaskFlow(observation)) {
@@ -849,7 +873,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 }
             }.onFailure { error ->
                 oneBrowseLog(
-                    "签到OCR失败 " + error.javaClass.simpleName +
+                    "签到OCR失败 " + formatOcrError(error) +
                         "，继续原入口逻辑",
                 )
                 val observation = latestValidTaobaoObservation()
@@ -1171,7 +1195,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 }
             }.onFailure { error ->
                 oneBrowseLog(
-                    contextLabel + " OCR失败 " + error.javaClass.simpleName,
+                    contextLabel + " OCR失败 " + formatOcrError(error),
                 )
                 onMiss()
             }
@@ -1341,7 +1365,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 }
             }.onFailure { error ->
                 failOneBrowse(
-                    "入口最终OCR失败 " + error.javaClass.simpleName,
+                    "入口最终OCR失败 " + formatOcrError(error),
                 )
             }
         }
@@ -1468,7 +1492,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             }.onFailure { error ->
                 oneBrowseLog(
                     "返回过程中入口OCR失败 " +
-                        error.javaClass.simpleName,
+                        formatOcrError(error),
                 )
             }
         }
@@ -1680,7 +1704,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 )
             }.onFailure { error ->
                 oneBrowseLog(
-                    "OCR任务按钮扫描失败 " + error.javaClass.simpleName +
+                    "OCR任务按钮扫描失败 " + formatOcrError(error) +
                         "，按XML状态继续",
                 )
                 handleNoTaskCandidate(
@@ -2113,7 +2137,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     )
                 }
             }.onFailure { error ->
-                oneBrowseLog("OCR检查失败 " + error.javaClass.simpleName)
+                oneBrowseLog("OCR检查失败 " + formatOcrError(error))
             }
         }
     }
@@ -2846,6 +2870,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         CapabilityState.publish(label, message)
     }
 
+    private fun formatOcrError(error: Throwable): String =
+        error.javaClass.simpleName +
+            (error.message?.let { ": " + it } ?: "")
+
     private fun captureOcrSnapshot(
         callback: (Result<OcrSnapshot>) -> Unit,
     ) {
@@ -2969,7 +2997,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val BROWSE_TICK_MS = 200L
         private const val SEARCH_DISCOVERY_SETTLE_MS = 1_500L
         private const val TASK_LIST_SETTLE_MS = 650L
-        private const val TASK_TRANSITION_MIN_SETTLE_MS = 1_600L
+        private const val TASK_TRANSITION_MIN_SETTLE_MS = 2_000L
         private const val TASK_TRANSITION_FIRST_CHECK_MS = 500L
         private const val TASK_TRANSITION_WATCHDOG_MS = 450L
         private const val RESTART_ENTRY_TIMEOUT_MS = 15_000L
@@ -3067,6 +3095,11 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             context: Context,
             targetUserId: Int,
         ): String {
+            if (!ShizukuBridge.isReady()) {
+                debugClearQueuedCoinMainline(context)
+                return "rejected run_coin_mainline: Shizuku unavailable or unauthorized"
+            }
+
             val service = instance
             val observation = ObserverState.latestExternalObservation
             val recognition = RecognitionState.latest

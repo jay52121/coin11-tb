@@ -33,7 +33,8 @@ object TaskPageContext {
 
         if (
             rawPageType != PageType.TAOBAO_HOME &&
-            rawPageType != PageType.UNKNOWN_TAOBAO_PAGE
+            rawPageType != PageType.UNKNOWN_TAOBAO_PAGE &&
+            rawPageType != PageType.COIN_HOME
         ) {
             return rawPageType
         }

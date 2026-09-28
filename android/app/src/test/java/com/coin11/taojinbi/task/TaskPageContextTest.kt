@@ -31,6 +31,27 @@ class TaskPageContextTest {
     }
 
     @Test
+    fun waitingEntryCanReinterpretCoinHomeWhenBrowseSignalsExist() {
+        assertEquals(
+            PageType.TAOBAO_BROWSE_TASK,
+            TaskPageContext.effectiveBrowsePageType(
+                rawPageType = PageType.COIN_HOME,
+                observation = observation("淘金币首页", "浏览5秒", "返回图标"),
+                phase = BrowseContextPhase.WAITING_ENTRY,
+            ),
+        )
+
+        assertEquals(
+            PageType.COIN_HOME,
+            TaskPageContext.effectiveBrowsePageType(
+                rawPageType = PageType.COIN_HOME,
+                observation = observation("淘金币首页", "购物车"),
+                phase = BrowseContextPhase.WAITING_ENTRY,
+            ),
+        )
+    }
+
+    @Test
     fun confirmedBrowseContextOwnsHomeLikeRawPage() {
         assertEquals(
             PageType.TAOBAO_BROWSE_TASK,
