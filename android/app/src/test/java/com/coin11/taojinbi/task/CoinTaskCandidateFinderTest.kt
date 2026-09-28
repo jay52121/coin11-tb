@@ -40,7 +40,7 @@ class CoinTaskCandidateFinderTest {
         val candidate = CoinTaskCandidateFinder.findNext(
             observation(
                 node(0, "淘金币趣味答题", 100, 400, 700, 500),
-                node(1, "去逛逛", 900, 410, 1200, 500),
+                node(1, "去完成", 900, 410, 1200, 500),
             ),
             handledKeys = emptySet(),
         )
@@ -71,7 +71,7 @@ class CoinTaskCandidateFinderTest {
     fun progressLabelKeepsSameTaskKeyAcrossDifferentActionText() {
         val firstObservation = observation(
             node(0, "头条极速版刷视频(0/1)", 100, 400, 760, 500),
-            node(1, "去完成", 900, 410, 1200, 500),
+            node(1, "去逛逛", 900, 410, 1200, 500),
         )
         val first = CoinTaskCandidateFinder.findNext(
             firstObservation,
