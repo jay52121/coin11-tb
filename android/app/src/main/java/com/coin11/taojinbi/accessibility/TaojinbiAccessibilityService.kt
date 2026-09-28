@@ -1362,6 +1362,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         val candidate = CoinTaskCandidateFinder.findNext(
             observation = observation,
             handledKeys = handledCoinTaskKeys,
+            excludeWords = rules.coinExcludeTags + rules.skipTaskExtraWords,
         )
 
         if (candidate != null) {

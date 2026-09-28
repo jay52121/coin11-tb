@@ -49,11 +49,7 @@ object CoinTaskCandidateFinder {
         "农场",
     )
 
-    private val excludedContextWords = listOf(
-        "下单",
-        "快手",
-        "评价",
-        "助力",
+    private val intrinsicExcludedContextWords = listOf(
         "答题",
         "趣味",
         "订阅",
@@ -72,12 +68,13 @@ object CoinTaskCandidateFinder {
     fun findNext(
         observation: Observation,
         handledKeys: Set<String>,
+        excludeWords: List<String> = DEFAULT_EXCLUDE_WORDS,
     ): CoinTaskCandidate? {
         val nodes = observation.nodes
             .filter { it.enabled && hasUsableBounds(it.bounds) }
 
         return nodes
-            .mapNotNull { node -> toCandidate(nodes, node) }
+            .mapNotNull { node -> toCandidate(nodes, node, excludeWords) }
             .filterNot { it.key in handledKeys }
             .sortedWith(
                 compareBy<CoinTaskCandidate> { it.bounds.top }
@@ -89,6 +86,7 @@ object CoinTaskCandidateFinder {
     private fun toCandidate(
         nodes: List<NodeSnapshot>,
         node: NodeSnapshot,
+        excludeWords: List<String>,
     ): CoinTaskCandidate? {
         val action = nodeText(node)
         if (action.isBlank()) {
@@ -100,7 +98,9 @@ object CoinTaskCandidateFinder {
             return null
         }
 
-        val excluded = excludedContextWords.any { context.contains(it) }
+        val excluded =
+            intrinsicExcludedContextWords.any { context.contains(it) } ||
+                excludedByRuleWords(context, excludeWords)
 
         val kind = when {
             rewardActions.any { action.contains(it) } && !excluded ->
@@ -136,6 +136,40 @@ object CoinTaskCandidateFinder {
         )
     }
 
+    private fun excludedByRuleWords(
+        context: String,
+        excludeWords: List<String>,
+    ): Boolean {
+        val compactTask = normalizeForRule(context)
+        val compactWords = excludeWords
+            .map(::normalizeForRule)
+            .filter { it.isNotBlank() }
+
+        if (
+            "uc" in compactWords &&
+            Regex("去逛0[6g]送红包福利").containsMatchIn(compactTask)
+        ) {
+            return true
+        }
+
+        val hasBrowseStep =
+            Regex("浏览\\d{1,3}秒|点击去逛").containsMatchIn(compactTask)
+
+        for (word in compactWords) {
+            if (!compactTask.contains(word)) {
+                continue
+            }
+            if (word.contains("下单") && hasBrowseStep) {
+                continue
+            }
+            return true
+        }
+        return false
+    }
+
+    private fun normalizeForRule(text: String): String =
+        text.replace(Regex("\\s+"), "").lowercase()
+
     private fun rowContext(
         nodes: List<NodeSnapshot>,
         actionNode: NodeSnapshot,
@@ -162,6 +196,8 @@ object CoinTaskCandidateFinder {
         bounds.right > bounds.left && bounds.bottom > bounds.top
 
     private const val ROW_Y_TOLERANCE = 130
+    private val DEFAULT_EXCLUDE_WORDS =
+        listOf("下单", "快手", "评价", "助力", "头条")
     private val TASK_PROGRESS_REGEX =
         Regex("([^\\s，。；;（）()]{2,40}[（(]\\d+/\\d+[）)])")
 }

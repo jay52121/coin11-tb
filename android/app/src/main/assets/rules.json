@@ -4,6 +4,7 @@
   "earn_words": ["赚金币"],
   "daily_version_words": ["回日常版"],
   "allow_daily_version_fallback": false,
+  "coin_exclude_tags": ["下单", "快手", "评价", "助力", "头条"],
   "skip_task_extra_words": [],
   "done_words": ["已完成", "已领取", "已得", "任务已完成", "记得明天再来"],
   "search_browse_words": ["搜索后浏览立得奖励", "搜索有福利", "淘宝精选", "搜索发现", "历史搜索"],

@@ -91,6 +91,34 @@ class CoinTaskCandidateFinderTest {
         assertNull(second)
     }
 
+    @Test
+    fun skipsToutiaoTaskByConfiguredExcludeWord() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation(
+                node(0, "头条刷热点领现金(0/1)", 100, 400, 760, 500),
+                node(1, "点击去逛", 900, 410, 1200, 500),
+            ),
+            handledKeys = emptySet(),
+            excludeWords = listOf("头条"),
+        )
+
+        assertNull(candidate)
+    }
+
+    @Test
+    fun explicitBrowseStepCanIgnoreOrderExcludeWord() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation(
+                node(0, "下单频道 浏览5秒", 100, 400, 760, 500),
+                node(1, "点击去逛", 900, 410, 1200, 500),
+            ),
+            handledKeys = emptySet(),
+            excludeWords = listOf("下单"),
+        )
+
+        assertEquals(CoinTaskKind.BROWSE, candidate?.kind)
+    }
+
     private fun observation(vararg nodes: NodeSnapshot) = Observation(
         id = 1L,
         capturedAtMillis = 1L,

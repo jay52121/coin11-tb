@@ -8,6 +8,8 @@ data class RuleSet(
     val earnWords: List<String>,
     val dailyVersionWords: List<String>,
     val allowDailyVersionFallback: Boolean,
+    val coinExcludeTags: List<String>,
+    val skipTaskExtraWords: List<String>,
     val doneWords: List<String>,
     val searchBrowseWords: List<String>,
     val coinHomeWords: List<String>,
@@ -29,6 +31,8 @@ data class RuleSet(
             earnWords = listOf("赚金币"),
             dailyVersionWords = listOf("回日常版"),
             allowDailyVersionFallback = false,
+            coinExcludeTags = listOf("下单", "快手", "评价", "助力", "头条"),
+            skipTaskExtraWords = emptyList(),
             doneWords = listOf("已完成", "已领取", "已得", "任务已完成", "记得明天再来"),
             searchBrowseWords = listOf("搜索后浏览立得奖励", "搜索有福利", "淘宝精选", "搜索发现", "历史搜索"),
             coinHomeWords = listOf("淘金币首页", "淘金币标题", "可抵", "购物车", "赚金币抵钱", "赚更多金币"),
@@ -68,6 +72,8 @@ data class RuleSet(
                 } else {
                     DEFAULT.allowDailyVersionFallback
                 },
+                coinExcludeTags = strings("coin_exclude_tags", DEFAULT.coinExcludeTags),
+                skipTaskExtraWords = strings("skip_task_extra_words", DEFAULT.skipTaskExtraWords),
                 doneWords = strings("done_words", DEFAULT.doneWords),
                 searchBrowseWords = strings("search_browse_words", DEFAULT.searchBrowseWords),
                 coinHomeWords = strings("coin_home_words", DEFAULT.coinHomeWords),
