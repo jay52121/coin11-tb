@@ -31,15 +31,15 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "run_coin_mainline" -> {
                 val queued = TaojinbiAccessibilityService.debugQueueCoinMainline(context)
                 if (queued.contains("queued")) {
-                    val submitted = ShizukuBridge.openCoinAsUser(
+                    val launch = ShizukuBridge.openCoinAsUserWhenReady(
                         TARGET_USER_ID,
                         COIN_HOME_URL,
                     )
-                    if (submitted) {
-                        queued + "; Shizuku launch user " + TARGET_USER_ID + " submitted"
+                    if (launch.accepted) {
+                        queued + "; " + launch.detail
                     } else {
                         TaojinbiAccessibilityService.debugClearQueuedCoinMainline(context)
-                        "rejected run_coin_mainline: Shizuku unavailable or unauthorized"
+                        "rejected run_coin_mainline: " + launch.detail
                     }
                 } else {
                     queued

@@ -1,6 +1,8 @@
 package com.coin11.taojinbi.shizuku
 
 import android.content.pm.PackageManager
+import android.os.SystemClock
+import android.util.Log
 import com.coin11.taojinbi.capability.CapabilityState
 import rikka.shizuku.Shizuku
 import java.io.InputStream
@@ -9,6 +11,11 @@ import java.util.concurrent.Executors
 object ShizukuBridge {
 
     const val REQUEST_CODE = 4107
+
+    data class LaunchRequestResult(
+        val accepted: Boolean,
+        val detail: String,
+    )
 
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ShizukuCapabilityLab").apply {
@@ -101,6 +108,86 @@ object ShizukuBridge {
             command = "am start --user $userId -a android.intent.action.VIEW -d ${shQuote(url)} -p com.taobao.taobao",
         )
 
+    fun openCoinAsUserWhenReady(
+        userId: Int,
+        url: String,
+        waitTimeoutMs: Long = 10_000L,
+    ): LaunchRequestResult {
+        val command =
+            "am start --user $userId -a android.intent.action.VIEW -d ${shQuote(url)} -p com.taobao.taobao"
+        val label = "启动淘金币 user $userId"
+
+        val binderReady = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+        if (binderReady) {
+            val permission = runCatching { Shizuku.checkSelfPermission() }
+                .getOrDefault(PackageManager.PERMISSION_DENIED)
+
+            if (permission != PackageManager.PERMISSION_GRANTED) {
+                CapabilityState.publish(label, "Shizuku 已连接但未授权。")
+                Log.w(TAG, "launch user $userId rejected: binder ready but permission denied")
+                return LaunchRequestResult(
+                    accepted = false,
+                    detail = "Shizuku connected but unauthorized",
+                )
+            }
+
+            val submitted = runCommand(label, command)
+            return LaunchRequestResult(
+                accepted = submitted,
+                detail = if (submitted) {
+                    "Shizuku launch user $userId submitted"
+                } else {
+                    "Shizuku launch submit failed"
+                },
+            )
+        }
+
+        Log.i(TAG, "binder not ready; wait up to ${waitTimeoutMs}ms for user $userId launch")
+        executor.execute {
+            val deadline = SystemClock.elapsedRealtime() + waitTimeoutMs
+
+            while (SystemClock.elapsedRealtime() < deadline) {
+                val ready = runCatching { Shizuku.pingBinder() }.getOrDefault(false)
+                if (ready) {
+                    val permission = runCatching { Shizuku.checkSelfPermission() }
+                        .getOrDefault(PackageManager.PERMISSION_DENIED)
+
+                    if (permission != PackageManager.PERMISSION_GRANTED) {
+                        CapabilityState.publish(label, "Shizuku binder 已连接，但授权未通过。")
+                        Log.w(TAG, "deferred launch user $userId aborted: permission denied")
+                        return@execute
+                    }
+
+                    val result = runCatching {
+                        runShellReflective(command)
+                    }
+
+                    result.onSuccess { shell ->
+                        publishShellResult(label, shell)
+                        Log.i(
+                            TAG,
+                            "deferred launch user $userId finished exitCode=" + shell.exitCode,
+                        )
+                    }.onFailure { error ->
+                        CapabilityState.publish(label, error.stackTraceToString())
+                        Log.e(TAG, "deferred launch user $userId failed", error)
+                    }
+                    return@execute
+                }
+
+                Thread.sleep(SHIZUKU_RETRY_INTERVAL_MS)
+            }
+
+            CapabilityState.publish(label, "等待 Shizuku binder 超时。")
+            Log.w(TAG, "deferred launch user $userId timed out waiting for binder")
+        }
+
+        return LaunchRequestResult(
+            accepted = true,
+            detail = "waiting for Shizuku binder; launch user $userId queued",
+        )
+    }
+
     fun queryForegroundActivity() {
         runCommand(
             label = "前台 Activity",
@@ -125,21 +212,28 @@ object ShizukuBridge {
             }
 
             result.onSuccess { shell ->
-                CapabilityState.publish(
-                    label,
-                    buildString {
-                        appendLine("exitCode：${shell.exitCode}")
-                        appendLine("--- stdout ---")
-                        appendLine(shell.stdout.ifBlank { "(empty)" })
-                        appendLine("--- stderr ---")
-                        append(shell.stderr.ifBlank { "(empty)" })
-                    },
-                )
+                publishShellResult(label, shell)
             }.onFailure { error ->
                 CapabilityState.publish(label, error.stackTraceToString())
             }
         }
         return true
+    }
+
+    private fun publishShellResult(
+        label: String,
+        shell: ShellResult,
+    ) {
+        CapabilityState.publish(
+            label,
+            buildString {
+                appendLine("exitCode：${shell.exitCode}")
+                appendLine("--- stdout ---")
+                appendLine(shell.stdout.ifBlank { "(empty)" })
+                appendLine("--- stderr ---")
+                append(shell.stderr.ifBlank { "(empty)" })
+            },
+        )
     }
 
     /**
@@ -195,4 +289,7 @@ object ShizukuBridge {
         val stdout: String,
         val stderr: String,
     )
+
+    private const val TAG = "TaojinbiShizuku"
+    private const val SHIZUKU_RETRY_INTERVAL_MS = 250L
 }
