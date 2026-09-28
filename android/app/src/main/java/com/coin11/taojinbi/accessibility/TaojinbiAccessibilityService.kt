@@ -100,6 +100,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var currentCoinTaskKey = ""
     private var currentCoinTaskClickKey = ""
     private var currentCoinTaskClickLimit = 0
+    private var oneBrowseTaskClickAtMillis = 0L
     private var taskListOcrInFlight = false
     private var expandedMoreCoinTasks = false
     private var taskDecisionAfterObservationId = -1L
@@ -137,6 +138,89 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             if (oneBrowseStage == OneBrowseStage.RETURNING) {
                 handler.postDelayed(this, RETURN_WATCHDOG_INTERVAL_MS)
             }
+        }
+    }
+
+    private val taskTransitionWatchdog = object : Runnable {
+        override fun run() {
+            if (
+                oneBrowseStage != OneBrowseStage.WAITING_BROWSE_PAGE &&
+                oneBrowseStage != OneBrowseStage.WAITING_REWARD_RESULT
+            ) {
+                return
+            }
+
+            scheduleCapture()
+            val observation = ObserverState.latestExternalObservation
+            val recognition = RecognitionState.latest
+            if (
+                observation != null &&
+                ObserverState.latestObservationValid &&
+                recognition?.observationId == observation.id
+            ) {
+                onOneBrowseObservation(
+                    observation = observation,
+                    pageType = recognition.result.pageType,
+                )
+            }
+
+            if (
+                oneBrowseStage != OneBrowseStage.WAITING_BROWSE_PAGE &&
+                oneBrowseStage != OneBrowseStage.WAITING_REWARD_RESULT
+            ) {
+                return
+            }
+
+            if (System.currentTimeMillis() >= oneBrowseStageDeadlineMillis) {
+                val page = recognition?.result?.pageType
+                when (oneBrowseStage) {
+                    OneBrowseStage.WAITING_BROWSE_PAGE -> {
+                        if (
+                            observation != null &&
+                            ObserverState.latestObservationValid &&
+                            page == PageType.DAILY_TASK_LIST
+                        ) {
+                            markCurrentTaskClickInvalid(
+                                observation,
+                                "点击后等待超时且仍在 daily_task_list",
+                            )
+                        } else {
+                            startOneBrowseReturn(
+                                shouldSucceed = false,
+                                reason =
+                                    "点击后等待超时，最后 page=" +
+                                        (page?.wireName ?: "(none)"),
+                            )
+                        }
+                    }
+
+                    OneBrowseStage.WAITING_REWARD_RESULT -> {
+                        if (
+                            observation != null &&
+                            ObserverState.latestObservationValid &&
+                            page == PageType.DAILY_TASK_LIST
+                        ) {
+                            finishCurrentTaskOnDailyList(
+                                observation = observation,
+                                success = true,
+                                message = "奖励点击后留在任务列表",
+                            )
+                        } else {
+                            startOneBrowseReturn(
+                                shouldSucceed = false,
+                                reason =
+                                    "奖励动作等待超时，最后 page=" +
+                                        (page?.wireName ?: "(none)"),
+                            )
+                        }
+                    }
+
+                    else -> Unit
+                }
+                return
+            }
+
+            handler.postDelayed(this, TASK_TRANSITION_WATCHDOG_MS)
         }
     }
 
@@ -430,6 +514,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(coinEntryWaitRunnable)
         handler.removeCallbacks(returnWatchdog)
+        handler.removeCallbacks(taskTransitionWatchdog)
         handler.removeCallbacks(externalTaskWatchdog)
         oneBrowseStage = OneBrowseStage.IDLE
         oneBrowseStageDeadlineMillis = 0L
@@ -457,6 +542,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         currentCoinTaskKey = ""
         currentCoinTaskClickKey = ""
         currentCoinTaskClickLimit = 0
+        oneBrowseTaskClickAtMillis = 0L
         taskListOcrInFlight = false
         expandedMoreCoinTasks = false
         taskDecisionAfterObservationId = -1L
@@ -547,10 +633,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             OneBrowseStage.WAITING_BROWSE_PAGE -> {
                 when (effectivePageType) {
                     PageType.DAILY_TASK_LIST -> {
-                        markCurrentTaskClickInvalid(
-                            observation,
-                            "点击后仍在 daily_task_list",
-                        )
+                        if (taskTransitionSettled()) {
+                            markCurrentTaskClickInvalid(
+                                observation,
+                                "点击后仍在 daily_task_list",
+                            )
+                        }
                     }
                     PageType.COIN_HOME -> {
                         oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
@@ -589,11 +677,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
             OneBrowseStage.WAITING_REWARD_RESULT -> {
                 when (pageType) {
-                    PageType.DAILY_TASK_LIST -> finishCurrentTaskOnDailyList(
-                        observation = observation,
-                        success = true,
-                        message = "奖励动作完成",
-                    )
+                    PageType.DAILY_TASK_LIST -> {
+                        if (taskTransitionSettled()) {
+                            finishCurrentTaskOnDailyList(
+                                observation = observation,
+                                success = true,
+                                message = "奖励动作完成",
+                            )
+                        }
+                    }
                     PageType.COIN_HOME -> {
                         oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
                         enterTaskListForOneBrowse(observation)
@@ -1468,6 +1560,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseTaskDescription =
             candidate.actionText + " | " + candidate.contextText.take(140)
         oneBrowseTaskListScrolls = 0
+        oneBrowseTaskClickAtMillis = System.currentTimeMillis()
         coinTaskClickCounts[candidate.key] =
             (coinTaskClickCounts[candidate.key] ?: 0) + 1
 
@@ -1509,6 +1602,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             invalidCoinTaskClickKeys += candidate.clickKey
             oneBrowseLog("任务点击未排队，标记 invalid clickKey=" + candidate.clickKey)
             resumeTaskFindingFresh(sourceObservationId)
+        } else {
+            handler.removeCallbacks(taskTransitionWatchdog)
+            handler.postDelayed(
+                taskTransitionWatchdog,
+                TASK_TRANSITION_FIRST_CHECK_MS,
+            )
         }
         return queued
     }
@@ -1741,11 +1840,17 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         )
     }
 
+    private fun taskTransitionSettled(): Boolean =
+        System.currentTimeMillis() - oneBrowseTaskClickAtMillis >=
+            TASK_TRANSITION_MIN_SETTLE_MS
+
     private fun clearCurrentCoinTask() {
+        handler.removeCallbacks(taskTransitionWatchdog)
         oneBrowseTaskDescription = ""
         currentCoinTaskKey = ""
         currentCoinTaskClickKey = ""
         currentCoinTaskClickLimit = 0
+        oneBrowseTaskClickAtMillis = 0L
         oneBrowseBackCount = 0
     }
 
@@ -1784,6 +1889,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         if (oneBrowseStage == OneBrowseStage.BROWSING) {
             return
         }
+        handler.removeCallbacks(taskTransitionWatchdog)
         oneBrowseStage = OneBrowseStage.BROWSING
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseNextSwipeAtMillis =
@@ -2013,6 +2119,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             return false
         }
 
+        handler.removeCallbacks(taskTransitionWatchdog)
         val now = System.currentTimeMillis()
         externalTaskSession = ExternalTaskSession(
             packageName = packageName,
@@ -2326,6 +2433,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(returnWatchdog)
+        handler.removeCallbacks(taskTransitionWatchdog)
         handler.removeCallbacks(externalTaskWatchdog)
         oneBrowseReturnShouldSucceed = shouldSucceed
         oneBrowseStage = OneBrowseStage.RETURNING
@@ -2435,6 +2543,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(coinEntryWaitRunnable)
         handler.removeCallbacks(returnWatchdog)
+        handler.removeCallbacks(taskTransitionWatchdog)
         handler.removeCallbacks(externalTaskWatchdog)
         taskListOcrInFlight = false
         oneBrowseStage =
@@ -2776,6 +2885,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val BROWSE_TICK_MS = 200L
         private const val SEARCH_DISCOVERY_SETTLE_MS = 1_500L
         private const val TASK_LIST_SETTLE_MS = 650L
+        private const val TASK_TRANSITION_MIN_SETTLE_MS = 1_600L
+        private const val TASK_TRANSITION_FIRST_CHECK_MS = 500L
+        private const val TASK_TRANSITION_WATCHDOG_MS = 450L
         private const val RESTART_ENTRY_TIMEOUT_MS = 15_000L
         private const val MAX_BROWSE_NEXT_TASK_HOPS = 8
         private const val RETURN_TIMEOUT_MS = 12_000L
