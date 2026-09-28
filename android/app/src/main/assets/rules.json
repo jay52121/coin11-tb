@@ -3,6 +3,7 @@
   "earn_more_words": ["赚更多金币"],
   "earn_words": ["赚金币"],
   "daily_version_words": ["回日常版"],
+  "allow_daily_version_fallback": false,
   "skip_task_extra_words": [],
   "done_words": ["已完成", "已领取", "已得", "任务已完成", "记得明天再来"],
   "search_browse_words": ["搜索后浏览立得奖励", "搜索有福利", "淘宝精选", "搜索发现", "历史搜索"],

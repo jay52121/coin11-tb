@@ -1012,6 +1012,11 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun startDailyVersionOrFinalTaskListCheck(
         observation: com.coin11.taojinbi.observation.Observation,
     ): Boolean {
+        if (!rules.allowDailyVersionFallback) {
+            oneBrowseLog("回日常版兜底关闭，跳过")
+            return startFinalTaskListOcrCheck()
+        }
+
         if (!oneBrowseDailyFallbackClicked) {
             val daily = BrowseTaskCandidateFinder.findDailyVersionEntry(
                 observation,
