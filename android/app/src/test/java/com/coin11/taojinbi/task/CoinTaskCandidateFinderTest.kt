@@ -3,103 +3,114 @@ package com.coin11.taojinbi.task
 import com.coin11.taojinbi.observation.IntRect
 import com.coin11.taojinbi.observation.NodeSnapshot
 import com.coin11.taojinbi.observation.Observation
+import com.coin11.taojinbi.ocr.OcrLine
+import com.coin11.taojinbi.ocr.OcrSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoinTaskCandidateFinderTest {
 
-    @Test
-    fun findsBrowseTask() {
-        val candidate = CoinTaskCandidateFinder.findNext(
-            observation(
-                node(0, "浏览商品15秒", 100, 400, 700, 500),
-                node(1, "去逛逛", 900, 410, 1200, 500),
-            ),
-            handledKeys = emptySet(),
-        )
-
-        assertEquals(CoinTaskKind.BROWSE, candidate?.kind)
-    }
+    private val policy = CoinTaskPolicy(
+        actionTextPattern = "去完成|去逛逛|点击去逛|领取奖励",
+        rewardButtonPattern = "领取奖励",
+        excludeWords = listOf("下单", "快手", "评价", "助力", "头条"),
+        doneWords = listOf("已完成", "已领取", "已得"),
+        doneExcludeWords = listOf("累计已得", "累积已得"),
+    )
 
     @Test
-    fun findsRewardTask() {
+    fun genericActionUsesMacProgressKeyAndClickLimit() {
         val candidate = CoinTaskCandidateFinder.findNext(
-            observation(
-                node(0, "今日任务奖励", 100, 400, 700, 500),
-                node(1, "领取奖励", 900, 410, 1200, 500),
-            ),
-            handledKeys = emptySet(),
-        )
-
-        assertEquals(CoinTaskKind.REWARD, candidate?.kind)
-    }
-
-    @Test
-    fun skipsSpecialTask() {
-        val candidate = CoinTaskCandidateFinder.findNext(
-            observation(
-                node(0, "淘金币趣味答题", 100, 400, 700, 500),
+            observation = observation(
+                node(0, "看看美瞳日抛混装(1/5)", 100, 400, 760, 500),
                 node(1, "去完成", 900, 410, 1200, 500),
             ),
-            handledKeys = emptySet(),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertNotNull(candidate)
+        assertEquals("看看美瞳日抛混装(1/5)", candidate!!.key)
+        assertEquals(6, candidate.clickLimit)
+    }
+
+    @Test
+    fun progressDoneSkipsCandidate() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation(
+                node(0, "看看美瞳日抛混装(5/5)", 100, 400, 760, 500),
+                node(1, "去完成", 900, 410, 1200, 500),
+            ),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
         )
 
         assertNull(candidate)
     }
 
     @Test
-    fun doesNotRepeatHandledCandidate() {
+    fun clickCountAllowsRetryUntilMacLimit() {
         val observation = observation(
-            node(0, "浏览商品15秒", 100, 400, 700, 500),
+            node(0, "浏览商品(0/1)", 100, 400, 760, 500),
             node(1, "去逛逛", 900, 410, 1200, 500),
         )
-        val first = CoinTaskCandidateFinder.findNext(
-            observation,
-            handledKeys = emptySet(),
-        )
 
-        val second = CoinTaskCandidateFinder.findNext(
-            observation,
-            handledKeys = setOf(first!!.key),
+        assertNotNull(
+            CoinTaskCandidateFinder.findNext(
+                observation,
+                clickCounts = mapOf("浏览商品(0/1)" to 1),
+                invalidClickKeys = emptySet(),
+                policy = policy,
+            ),
         )
-
-        assertNull(second)
+        assertNull(
+            CoinTaskCandidateFinder.findNext(
+                observation,
+                clickCounts = mapOf("浏览商品(0/1)" to 2),
+                invalidClickKeys = emptySet(),
+                policy = policy,
+            ),
+        )
     }
 
     @Test
-    fun progressLabelKeepsSameTaskKeyAcrossDifferentActionText() {
-        val firstObservation = observation(
-            node(0, "看看美瞳日抛混装(0/1)", 100, 400, 760, 500),
+    fun invalidClickKeySkipsOnlyThatTarget() {
+        val observation = observation(
+            node(0, "浏览商品(0/1)", 100, 400, 760, 500),
             node(1, "去逛逛", 900, 410, 1200, 500),
         )
         val first = CoinTaskCandidateFinder.findNext(
-            firstObservation,
-            handledKeys = emptySet(),
+            observation,
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
         )!!
 
-        val secondObservation = observation(
-            node(0, "看看美瞳日抛混装(0/1)", 100, 400, 760, 500),
-            node(1, "点击去逛", 900, 410, 1200, 500),
+        assertNull(
+            CoinTaskCandidateFinder.findNext(
+                observation,
+                clickCounts = emptyMap(),
+                invalidClickKeys = setOf(first.clickKey),
+                policy = policy,
+            ),
         )
-        val second = CoinTaskCandidateFinder.findNext(
-            secondObservation,
-            handledKeys = setOf(first.key),
-        )
-
-        assertEquals("progress:看看美瞳日抛混装(0/1)", first.key)
-        assertNull(second)
     }
 
     @Test
-    fun skipsToutiaoTaskByConfiguredExcludeWord() {
+    fun skipsToutiaoBeforeClick() {
         val candidate = CoinTaskCandidateFinder.findNext(
-            observation(
+            observation = observation(
                 node(0, "头条刷热点领现金(0/1)", 100, 400, 760, 500),
                 node(1, "点击去逛", 900, 410, 1200, 500),
             ),
-            handledKeys = emptySet(),
-            excludeWords = listOf("头条"),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
         )
 
         assertNull(candidate)
@@ -108,15 +119,96 @@ class CoinTaskCandidateFinderTest {
     @Test
     fun explicitBrowseStepCanIgnoreOrderExcludeWord() {
         val candidate = CoinTaskCandidateFinder.findNext(
-            observation(
+            observation = observation(
                 node(0, "下单频道 浏览5秒", 100, 400, 760, 500),
                 node(1, "点击去逛", 900, 410, 1200, 500),
             ),
-            handledKeys = emptySet(),
-            excludeWords = listOf("下单"),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
         )
 
-        assertEquals(CoinTaskKind.BROWSE, candidate?.kind)
+        assertNotNull(candidate)
+    }
+
+    @Test
+    fun rewardUsesTwoClickLimit() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation(
+                node(0, "今日任务奖励", 100, 400, 760, 500),
+                node(1, "领取奖励", 900, 410, 1200, 500),
+            ),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertEquals(CoinTaskKind.REWARD, candidate?.kind)
+        assertEquals(2, candidate?.clickLimit)
+    }
+
+    @Test
+    fun ocrCandidateUsesSamePolicy() {
+        val snapshot = ocrSnapshot(
+            ocr("浏览商品(0/1)", 100, 400, 760, 500),
+            ocr("去完成", 900, 410, 1200, 500),
+        )
+
+        val candidate = CoinTaskCandidateFinder.findNextFromOcr(
+            snapshot = snapshot,
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertNotNull(candidate)
+        assertEquals("浏览商品(0/1)", candidate!!.key)
+        assertEquals("ocr", candidate.source)
+    }
+
+    @Test
+    fun bottomAndExpandHelpersMatchMacMarkers() {
+        val observation = observation(
+            node(0, "收起更多任务", 100, 1000, 600, 1080),
+            node(1, "展开", 900, 1200, 1100, 1280),
+        )
+        assertTrue(
+            CoinTaskCandidateFinder.isTaskListAtBottom(
+                observation,
+                listOf("收起更多任务"),
+            ),
+        )
+        assertNotNull(
+            CoinTaskCandidateFinder.findExpandEntry(
+                observation,
+                listOf("展开"),
+            ),
+        )
+    }
+
+    @Test
+    fun findsNextTaskHopAndSearchDiscoveryTarget() {
+        val next = observation(
+            node(0, "下个任务", 20, 700, 180, 780),
+        )
+        assertNotNull(
+            CoinTaskCandidateFinder.findNextTaskHop(
+                next,
+                listOf("下个任务", "下一任务"),
+                1256,
+            ),
+        )
+
+        val search = observation(
+            node(0, "搜索发现", 100, 500, 500, 580),
+            node(1, "无线耳机", 100, 620, 600, 700),
+        )
+        assertNotNull(
+            CoinTaskCandidateFinder.findSearchDiscoveryTarget(
+                search,
+                listOf("搜索发现"),
+            ),
+        )
     }
 
     private fun observation(vararg nodes: NodeSnapshot) = Observation(
@@ -127,6 +219,24 @@ class CoinTaskCandidateFinderTest {
         nodes = nodes.toList(),
         truncated = false,
     )
+
+    private fun ocrSnapshot(vararg lines: OcrLine) = OcrSnapshot(
+        observationId = 1L,
+        capturedAtMillis = 1L,
+        screenshotWidth = 1256,
+        screenshotHeight = 2760,
+        screenshotElapsedMillis = 10,
+        recognitionElapsedMillis = 20,
+        lines = lines.toList(),
+    )
+
+    private fun ocr(
+        text: String,
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int,
+    ) = OcrLine(text, IntRect(left, top, right, bottom))
 
     private fun node(
         index: Int,
