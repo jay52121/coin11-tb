@@ -68,6 +68,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         RETURNING,
         DONE,
         FAILED,
+        STOPPED,
     }
 
     private var oneBrowseStage = OneBrowseStage.IDLE
@@ -421,7 +422,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         if (
             oneBrowseStage != OneBrowseStage.IDLE &&
             oneBrowseStage != OneBrowseStage.DONE &&
-            oneBrowseStage != OneBrowseStage.FAILED
+            oneBrowseStage != OneBrowseStage.FAILED &&
+            oneBrowseStage != OneBrowseStage.STOPPED
         ) {
             return "rejected busy stage=" + oneBrowseStage
         }
@@ -480,7 +482,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         if (
             oneBrowseStage != OneBrowseStage.IDLE &&
             oneBrowseStage != OneBrowseStage.DONE &&
-            oneBrowseStage != OneBrowseStage.FAILED
+            oneBrowseStage != OneBrowseStage.FAILED &&
+            oneBrowseStage != OneBrowseStage.STOPPED
         ) {
             return "rejected busy stage=" + oneBrowseStage
         }
@@ -526,6 +529,38 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 "rejected start page=" + recognition.result.pageType.wireName
             }
         }
+    }
+
+    private fun stopCoinMainlineManual(): String {
+        val previousStage = oneBrowseStage
+
+        handler.removeCallbacks(oneBrowseTick)
+        handler.removeCallbacks(coinEntryWaitRunnable)
+        handler.removeCallbacks(returnWatchdog)
+        handler.removeCallbacks(taskTransitionWatchdog)
+        handler.removeCallbacks(externalTaskWatchdog)
+
+        oneBrowseOcrInFlight = false
+        oneBrowseEntryOcrInFlight = false
+        taskListOcrInFlight = false
+        oneBrowsePageTransitionPending = false
+        externalTaskSession = null
+        externalRecoveryPendingCompletion = false
+
+        oneBrowseStage = OneBrowseStage.STOPPED
+        coinMainlineMode = false
+
+        val message =
+            "manual stop from=" + previousStage +
+                " completed=" + supportedCoinTasksCompleted +
+                " skipped=" + skippedCoinTasks +
+                " swipes=" + oneBrowseSwipeCount +
+                " ocrAttempts=" + oneBrowseOcrAttemptCount
+
+        oneBrowseLastMessage = message
+        oneBrowseLog("STOPPED " + message)
+
+        return "accepted stop_coin_mainline: " + message
     }
 
     private fun resetOneBrowseState() {
@@ -3176,6 +3211,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 )
                 .apply()
             return "accepted run_coin_mainline queued awaiting service/coin page"
+        }
+
+        fun debugStopCoinMainline(context: Context): String {
+            debugClearQueuedCoinMainline(context)
+            return instance?.stopCoinMainlineManual()
+                ?: "accepted stop_coin_mainline: queued request cleared; service disconnected"
         }
 
         fun debugClearQueuedCoinMainline(context: Context) {

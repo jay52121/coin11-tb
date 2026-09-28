@@ -48,6 +48,8 @@ class DebugCommandReceiver : BroadcastReceiver() {
                     queued
                 }
             }
+            "stop_coin_mainline" ->
+                TaojinbiAccessibilityService.debugStopCoinMainline(context)
             "status" -> TaojinbiAccessibilityService.debugStatusText()
             else -> "unknown command=" + command
         }
