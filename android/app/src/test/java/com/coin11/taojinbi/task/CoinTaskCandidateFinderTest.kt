@@ -70,7 +70,7 @@ class CoinTaskCandidateFinderTest {
     @Test
     fun progressLabelKeepsSameTaskKeyAcrossDifferentActionText() {
         val firstObservation = observation(
-            node(0, "头条极速版刷视频(0/1)", 100, 400, 760, 500),
+            node(0, "看看美瞳日抛混装(0/1)", 100, 400, 760, 500),
             node(1, "去逛逛", 900, 410, 1200, 500),
         )
         val first = CoinTaskCandidateFinder.findNext(
@@ -79,7 +79,7 @@ class CoinTaskCandidateFinderTest {
         )!!
 
         val secondObservation = observation(
-            node(0, "头条极速版刷视频(0/1)", 100, 400, 760, 500),
+            node(0, "看看美瞳日抛混装(0/1)", 100, 400, 760, 500),
             node(1, "点击去逛", 900, 410, 1200, 500),
         )
         val second = CoinTaskCandidateFinder.findNext(
@@ -87,7 +87,7 @@ class CoinTaskCandidateFinderTest {
             handledKeys = setOf(first.key),
         )
 
-        assertEquals("progress:头条极速版刷视频(0/1)", first.key)
+        assertEquals("progress:看看美瞳日抛混装(0/1)", first.key)
         assertNull(second)
     }
 
