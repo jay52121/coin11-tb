@@ -34,6 +34,7 @@ import com.coin11.taojinbi.task.CoinTaskKind
 import com.coin11.taojinbi.task.CoinTaskPolicy
 import com.coin11.taojinbi.task.TaskPageContext
 import com.coin11.taojinbi.shizuku.ShizukuBridge
+import kotlin.random.Random
 
 class TaojinbiAccessibilityService : AccessibilityService() {
 
@@ -265,7 +266,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             }
 
             if (now >= oneBrowseNextSwipeAtMillis) {
-                oneBrowseNextSwipeAtMillis = now + BROWSE_SWIPE_INTERVAL_MS
+                oneBrowseNextSwipeAtMillis = now + nextBrowseSwipeDelayMs()
                 swipeBrowseForOneTask()
             }
 
@@ -1976,20 +1977,44 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun swipeBrowseForOneTask() {
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
-        val x = (width * 0.36f).toInt()
+
+        val startX = Random.nextInt(
+            (width / 5).coerceAtLeast(1),
+            (width / 2).coerceAtLeast(2),
+        )
+        val startY = Random.nextInt(
+            (height * 0.62f).toInt().coerceAtLeast(1),
+            (height * 0.86f).toInt().coerceAtLeast(2),
+        )
+        val endXMin = (startX - 100).coerceAtLeast(1)
+        val endXMax = (startX + 20).coerceAtMost(width - 1)
+        val endX = if (endXMax > endXMin) {
+            Random.nextInt(endXMin, endXMax + 1)
+        } else {
+            endXMin
+        }
+        val endY = Random.nextInt(
+            (height * 0.16f).toInt().coerceAtLeast(1),
+            (height * 0.52f).toInt().coerceAtLeast(2),
+        )
+        val durationMs = Random.nextLong(250L, 501L)
+
         val queued = actionExecutor.swipe(
-            startX = x,
-            startY = (height * 0.78f).toInt(),
-            endX = (width * 0.32f).toInt(),
-            endY = (height * 0.34f).toInt(),
-            durationMs = 350L,
+            startX = startX,
+            startY = startY,
+            endX = endX,
+            endY = endY,
+            durationMs = durationMs,
         ) { result ->
-            publishActionResult("v0.4 Browse Swipe", result)
+            publishActionResult("v0.5 Browse Swipe", result)
         }
         if (queued) {
             invalidateObservationForAction("one_task_browse_swipe")
         }
     }
+
+    private fun nextBrowseSwipeDelayMs(): Long =
+        Random.nextLong(500L, 901L)
 
     private fun runOneBrowseOcrCheck() {
         if (oneBrowseStage != OneBrowseStage.BROWSING || oneBrowseOcrInFlight) {
@@ -2902,7 +2927,6 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val BROWSE_DURATION_MS = 30_000L
         private const val BROWSE_FIRST_OCR_DELAY_MS = 8_000L
         private const val BROWSE_OCR_INTERVAL_MS = 2_000L
-        private const val BROWSE_SWIPE_INTERVAL_MS = 800L
         private const val BROWSE_TICK_MS = 200L
         private const val SEARCH_DISCOVERY_SETTLE_MS = 1_500L
         private const val TASK_LIST_SETTLE_MS = 650L

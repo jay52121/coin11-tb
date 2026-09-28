@@ -245,6 +245,32 @@ class CoinTaskCandidateFinderTest {
         assertEquals(IntRect(60, 360, 1210, 620), candidate.bounds)
     }
 
+    @Test
+    fun expandUsesClickableContainerAndNextTaskUsesLeftEdgeTap() {
+        val expand = observation(
+            node(0, null, 780, 1100, 1180, 1320, clickable = true),
+            node(1, "展开", 900, 1160, 1080, 1230),
+        )
+        assertEquals(
+            IntRect(780, 1100, 1180, 1320),
+            CoinTaskCandidateFinder.findExpandEntry(
+                expand,
+                listOf("展开"),
+            )?.bounds,
+        )
+
+        val next = observation(
+            node(0, "下个任务", 120, 700, 300, 800),
+        )
+        val tap = CoinTaskCandidateFinder.findNextTaskHop(
+            next,
+            listOf("下个任务"),
+            1256,
+        )
+        assertNotNull(tap)
+        assertTrue(tap!!.right <= 56)
+    }
+
     private fun observation(vararg nodes: NodeSnapshot) = Observation(
         id = 1L,
         capturedAtMillis = 1L,

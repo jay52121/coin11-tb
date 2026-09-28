@@ -201,16 +201,21 @@ object CoinTaskCandidateFinder {
     fun findExpandEntry(
         observation: Observation,
         expandWords: List<String>,
-    ): NodeSnapshot? =
-        observation.nodes
-            .asSequence()
+    ): NodeSnapshot? {
+        val nodes = observation.nodes
             .filter { it.enabled && hasUsableBounds(it.bounds) }
+        val textNode = nodes
+            .asSequence()
             .filter { node ->
                 val text = nodeText(node)
                 expandWords.any { word -> text.contains(word) }
             }
             .sortedWith(compareBy<NodeSnapshot> { it.bounds.top }.thenBy { it.bounds.left })
             .firstOrNull()
+            ?: return null
+
+        return smallestClickableContainerNode(nodes, textNode.bounds) ?: textNode
+    }
 
     fun findExpandOcr(
         snapshot: OcrSnapshot,
@@ -230,8 +235,8 @@ object CoinTaskCandidateFinder {
         observation: Observation,
         nextTaskWords: List<String>,
         screenWidth: Int,
-    ): IntRect? =
-        observation.nodes
+    ): IntRect? {
+        val bounds = observation.nodes
             .asSequence()
             .filter { it.enabled && hasUsableBounds(it.bounds) }
             .filter { node ->
@@ -242,6 +247,12 @@ object CoinTaskCandidateFinder {
             .sortedWith(compareBy<NodeSnapshot> { it.bounds.top }.thenBy { it.bounds.left })
             .map { it.bounds }
             .firstOrNull()
+            ?: return null
+
+        val x = (bounds.left + 15).coerceIn(20, 55)
+        val y = centerY(bounds)
+        return IntRect(x - 1, y - 1, x + 1, y + 1)
+    }
 
     fun findNextTaskHopOcr(
         snapshot: OcrSnapshot,
@@ -294,7 +305,12 @@ object CoinTaskCandidateFinder {
                         !text.contains("搜索发现")
                 }
                 .sortedWith(compareBy<NodeSnapshot> { it.bounds.top }.thenBy { it.bounds.left })
-                .map { it.bounds }
+                .map { node ->
+                    smallestClickableContainerNode(
+                        observation.nodes,
+                        node.bounds,
+                    )?.bounds ?: node.bounds
+                }
                 .firstOrNull()
         }
 
@@ -306,7 +322,12 @@ object CoinTaskCandidateFinder {
             .filter { it.bounds.right - it.bounds.left > 80 }
             .filter { it.bounds.bottom - it.bounds.top > 40 }
             .sortedWith(compareBy<NodeSnapshot> { it.bounds.top }.thenBy { it.bounds.left })
-            .map { it.bounds }
+            .map { node ->
+                smallestClickableContainerNode(
+                    observation.nodes,
+                    node.bounds,
+                )?.bounds ?: node.bounds
+            }
             .firstOrNull()
     }
 
@@ -452,6 +473,12 @@ object CoinTaskCandidateFinder {
         nodes: List<NodeSnapshot>,
         childBounds: IntRect,
     ): IntRect? =
+        smallestClickableContainerNode(nodes, childBounds)?.bounds
+
+    private fun smallestClickableContainerNode(
+        nodes: List<NodeSnapshot>,
+        childBounds: IntRect,
+    ): NodeSnapshot? =
         nodes
             .asSequence()
             .filter { it.clickable && it.enabled && hasUsableBounds(it.bounds) }
@@ -469,7 +496,6 @@ object CoinTaskCandidateFinder {
                         (it.bounds.bottom - it.bounds.top)
                 }.thenBy { it.depth },
             )
-            ?.bounds
 
     private fun contains(
         outer: IntRect,
