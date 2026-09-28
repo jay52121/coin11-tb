@@ -83,6 +83,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var oneBrowseTaskListScrolls = 0
     private var oneBrowseBackCount = 0
     private var oneBrowseLastReturnActionAtMillis = 0L
+    private var oneBrowseReturnLastObservationId: Long? = null
+    private var oneBrowseReturnSameObservationTicks = 0
     private var oneBrowseTaskDescription = ""
     private var oneBrowseReturnShouldSucceed = true
     private var oneBrowseLastMessage = "idle"
@@ -94,6 +96,18 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
     private val coinEntryWaitRunnable = Runnable {
         runCoinEntryWaitTick()
+    }
+
+    private val returnWatchdog = object : Runnable {
+        override fun run() {
+            if (oneBrowseStage != OneBrowseStage.RETURNING) {
+                return
+            }
+            runReturnWatchdogTick()
+            if (oneBrowseStage == OneBrowseStage.RETURNING) {
+                handler.postDelayed(this, RETURN_WATCHDOG_INTERVAL_MS)
+            }
+        }
     }
 
     private val oneBrowseTick = object : Runnable {
@@ -275,6 +289,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             ?: return "rejected no matching recognition"
 
         resetOneBrowseState()
+        resetOneBrowseTrace("run_one_browse_task")
         coinMainlineMode = false
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseLog(
@@ -329,6 +344,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             ?: return "rejected no matching recognition"
 
         resetOneBrowseState()
+        resetOneBrowseTrace("run_coin_mainline")
         coinMainlineMode = true
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseLog(
@@ -361,6 +377,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun resetOneBrowseState() {
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(coinEntryWaitRunnable)
+        handler.removeCallbacks(returnWatchdog)
         oneBrowseStage = OneBrowseStage.IDLE
         oneBrowseStageDeadlineMillis = 0L
         oneBrowseNextSwipeAtMillis = 0L
@@ -376,6 +393,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseTaskListScrolls = 0
         oneBrowseBackCount = 0
         oneBrowseLastReturnActionAtMillis = 0L
+        oneBrowseReturnLastObservationId = null
+        oneBrowseReturnSameObservationTicks = 0
         oneBrowseTaskDescription = ""
         oneBrowseReturnShouldSucceed = true
         oneBrowseLastMessage = "idle"
@@ -513,6 +532,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             }
 
             OneBrowseStage.RETURNING -> {
+                oneBrowseReturnLastObservationId = observation.id
+                oneBrowseReturnSameObservationTicks = 0
                 when (pageType) {
                     PageType.DAILY_TASK_LIST -> finishCurrentTaskOnDailyList(
                         observation = observation,
@@ -529,9 +550,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                             enterTaskListForOneBrowse(observation, returning = true)
                         }
                     }
-                    else -> {
-                        scheduleOneBrowseBackIfNeeded()
-                    }
+                    else -> Unit
                 }
             }
         }
@@ -1459,50 +1478,83 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
 
         handler.removeCallbacks(oneBrowseTick)
+        handler.removeCallbacks(returnWatchdog)
         oneBrowseReturnShouldSucceed = shouldSucceed
         oneBrowseStage = OneBrowseStage.RETURNING
         oneBrowseStageDeadlineMillis =
             System.currentTimeMillis() + RETURN_TIMEOUT_MS
         oneBrowseBackCount = 0
         oneBrowseLastReturnActionAtMillis = 0L
-        oneBrowseLog("开始返回任务列表：" + reason)
-        scheduleOneBrowseBackIfNeeded()
+        oneBrowseReturnLastObservationId =
+            ObserverState.latestExternalObservation?.id
+        oneBrowseReturnSameObservationTicks = 0
+        oneBrowseLog(
+            "开始返回任务列表：" + reason +
+                "；watchdog=" + RETURN_TIMEOUT_MS + "ms",
+        )
+        handler.postDelayed(returnWatchdog, RETURN_BACK_SETTLE_MS)
     }
 
-    private fun scheduleOneBrowseBackIfNeeded() {
+    private fun runReturnWatchdogTick() {
         if (oneBrowseStage != OneBrowseStage.RETURNING) {
             return
         }
 
         val now = System.currentTimeMillis()
-        if (now > oneBrowseStageDeadlineMillis) {
+        val latestObservation = ObserverState.latestExternalObservation
+        val latestId = latestObservation?.id
+        if (latestId == oneBrowseReturnLastObservationId) {
+            oneBrowseReturnSameObservationTicks += 1
+        } else {
+            oneBrowseReturnLastObservationId = latestId
+            oneBrowseReturnSameObservationTicks = 0
+        }
+
+        if (now >= oneBrowseStageDeadlineMillis) {
             completeOneBrowse(
                 success = false,
-                message = "返回任务列表超时",
+                message =
+                    "返回任务列表超时；backs=" + oneBrowseBackCount +
+                        " lastObservation=" +
+                        (latestId?.let { "#" + it } ?: "(none)"),
             )
             return
         }
-        if (!canRunOneBrowseReturnAction()) {
-            return
-        }
+
         if (oneBrowseBackCount >= MAX_RETURN_BACKS) {
             completeOneBrowse(
                 success = false,
-                message = "连续 Back 后仍未返回任务列表",
+                message =
+                    "连续 Back " + oneBrowseBackCount +
+                        " 次仍未返回任务列表；lastObservation=" +
+                        (latestId?.let { "#" + it } ?: "(none)"),
             )
+            return
+        }
+
+        scheduleCapture()
+
+        if (!canRunOneBrowseReturnAction()) {
             return
         }
 
         oneBrowseLastReturnActionAtMillis = now
         oneBrowseBackCount += 1
+        oneBrowseLog(
+            "RETURN watchdog Back #" + oneBrowseBackCount +
+                " lastObservation=" +
+                (latestId?.let { "#" + it } ?: "(none)") +
+                " sameTicks=" + oneBrowseReturnSameObservationTicks,
+        )
+        globalBack()
+
         handler.postDelayed(
             {
                 if (oneBrowseStage == OneBrowseStage.RETURNING) {
-                    oneBrowseLog("Back #" + oneBrowseBackCount)
-                    globalBack()
+                    scheduleCapture()
                 }
             },
-            RETURN_BACK_SETTLE_MS,
+            RETURN_CAPTURE_AFTER_BACK_MS,
         )
     }
 
@@ -1533,6 +1585,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         message: String,
     ) {
         handler.removeCallbacks(oneBrowseTick)
+        handler.removeCallbacks(coinEntryWaitRunnable)
+        handler.removeCallbacks(returnWatchdog)
         oneBrowseStage =
             if (success) OneBrowseStage.DONE else OneBrowseStage.FAILED
         oneBrowseLastMessage = message
@@ -1545,10 +1599,41 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         completeOneBrowse(success = false, message = message)
     }
 
+    private fun resetOneBrowseTrace(label: String) {
+        runCatching {
+            openFileOutput(ONE_TASK_TRACE_FILE, Context.MODE_PRIVATE)
+                .bufferedWriter()
+                .use { writer ->
+                    writer.append(System.currentTimeMillis().toString())
+                    writer.append(" TRACE_START ")
+                    writer.append(label)
+                    writer.newLine()
+                }
+        }.onFailure { error ->
+            Log.w(ONE_TASK_TAG, "trace reset failed", error)
+        }
+    }
+
+    private fun appendOneBrowseTrace(message: String) {
+        runCatching {
+            openFileOutput(ONE_TASK_TRACE_FILE, Context.MODE_APPEND)
+                .bufferedWriter()
+                .use { writer ->
+                    writer.append(System.currentTimeMillis().toString())
+                    writer.append(" ")
+                    writer.append(message)
+                    writer.newLine()
+                }
+        }.onFailure { error ->
+            Log.w(ONE_TASK_TAG, "trace append failed", error)
+        }
+    }
+
     private fun oneBrowseLog(message: String) {
         oneBrowseLastMessage = message
         Log.i(ONE_TASK_TAG, message)
-        CapabilityState.publish("v0.4 OneTask", message)
+        appendOneBrowseTrace(message)
+        CapabilityState.publish("v0.5 OneTask", message)
     }
 
     private fun oneBrowseStatusText(): String =
@@ -1565,6 +1650,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             append(oneBrowseTaskListScrolls)
             append(" backs=")
             append(oneBrowseBackCount)
+            if (oneBrowseStage == OneBrowseStage.RETURNING) {
+                append(" returnLastObservation=")
+                append(oneBrowseReturnLastObservationId?.let { "#" + it } ?: "(none)")
+                append(" returnSameTicks=")
+                append(oneBrowseReturnSameObservationTicks)
+            }
             append(" mode=")
             append(if (coinMainlineMode) "coin_mainline" else "one_browse")
             append(" completed=")
@@ -1814,10 +1905,13 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val RETURN_TIMEOUT_MS = 12_000L
         private const val RETURN_ACTION_MIN_INTERVAL_MS = 900L
         private const val RETURN_BACK_SETTLE_MS = 450L
+        private const val RETURN_WATCHDOG_INTERVAL_MS = 850L
+        private const val RETURN_CAPTURE_AFTER_BACK_MS = 250L
         private const val MAX_TASK_LIST_SCROLLS = 4
         private const val MAX_MAINLINE_TASK_LIST_SCROLLS = 8
         private const val MAX_RETURN_BACKS = 5
         private const val DEBUG_MAINLINE_QUEUE_TTL_MS = 30_000L
+        private const val ONE_TASK_TRACE_FILE = "coin_mainline_trace.log"
         private const val DEBUG_REQUEST_PREFS = "debug_run_requests"
         private const val DEBUG_COIN_MAINLINE_UNTIL = "coin_mainline_until"
         private val ENTRY_PROGRESS_REGEX = Regex("[（(]\\d+/\\d+[）)]")
