@@ -28,6 +28,7 @@ import com.coin11.taojinbi.recognizer.RecognitionState
 import com.coin11.taojinbi.recognizer.RuleSet
 import com.coin11.taojinbi.recognizer.RulesLoader
 import com.coin11.taojinbi.task.BrowseContextPhase
+import com.coin11.taojinbi.task.BrowsePacing
 import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskKind
@@ -75,6 +76,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var oneBrowseNextSwipeAtMillis = 0L
     private var oneBrowseNextOcrAtMillis = 0L
     private var oneBrowseOcrInFlight = false
+    private var oneBrowseSwipeCount = 0
+    private var oneBrowseOcrAttemptCount = 0
+    private var oneBrowsePageTransitionPending = false
+    private var oneBrowseTransitionAfterObservationId = -1L
     private enum class CoinEntryKind {
         EARN_MORE,
         EARN,
@@ -265,8 +270,16 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 runOneBrowseOcrCheck()
             }
 
-            if (now >= oneBrowseNextSwipeAtMillis) {
-                oneBrowseNextSwipeAtMillis = now + nextBrowseSwipeDelayMs()
+            if (
+                BrowsePacing.shouldSwipe(
+                    nowMillis = now,
+                    nextSwipeAtMillis = oneBrowseNextSwipeAtMillis,
+                    ocrInFlight = oneBrowseOcrInFlight,
+                    pageTransitionPending = oneBrowsePageTransitionPending,
+                )
+            ) {
+                oneBrowseNextSwipeAtMillis =
+                    now + BrowsePacing.nextSwipeDelayMs()
                 swipeBrowseForOneTask()
             }
 
@@ -526,6 +539,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseNextSwipeAtMillis = 0L
         oneBrowseNextOcrAtMillis = 0L
         oneBrowseOcrInFlight = false
+        oneBrowseSwipeCount = 0
+        oneBrowseOcrAttemptCount = 0
+        oneBrowsePageTransitionPending = false
+        oneBrowseTransitionAfterObservationId = -1L
         oneBrowseEntryOcrInFlight = false
         oneBrowseEntryClicked = false
         oneBrowseSignClaimed = false
@@ -742,6 +759,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             }
 
             OneBrowseStage.BROWSING -> {
+                if (
+                    oneBrowsePageTransitionPending &&
+                    observation.id > oneBrowseTransitionAfterObservationId
+                ) {
+                    oneBrowsePageTransitionPending = false
+                    oneBrowseLog(
+                        "浏览页切换完成 Observation #" + observation.id,
+                    )
+                }
                 if (effectivePageType == PageType.TAOBAO_BROWSE_TASK) {
                     maybeClickSearchDiscovery(observation)
                 }
@@ -1980,10 +2006,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseStage = OneBrowseStage.BROWSING
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseNextSwipeAtMillis =
-            oneBrowseStartedAtMillis + SEARCH_DISCOVERY_SETTLE_MS
+            oneBrowseStartedAtMillis + BrowsePacing.nextFirstSwipeDelayMs()
         oneBrowseNextOcrAtMillis =
             oneBrowseStartedAtMillis + BROWSE_FIRST_OCR_DELAY_MS
         oneBrowseOcrInFlight = false
+        oneBrowseSwipeCount = 0
+        oneBrowseOcrAttemptCount = 0
+        oneBrowsePageTransitionPending = false
+        oneBrowseTransitionAfterObservationId = -1L
         oneBrowseNextTaskHops = 0
         oneBrowseSearchDiscoveryAttempted = false
         oneBrowseLog("进入 taobao_browse_task，开始30秒浏览")
@@ -2011,8 +2041,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseLog("搜索浏览页点击历史/发现首项 bounds=" + target)
         if (tapBoundsForOneBrowse(target, "browse_search_discovery")) {
             val now = System.currentTimeMillis()
+            markBrowsePageTransition()
             oneBrowseStartedAtMillis = now
-            oneBrowseNextSwipeAtMillis = now + SEARCH_DISCOVERY_SETTLE_MS
+            oneBrowseNextSwipeAtMillis =
+                now + BrowsePacing.nextFirstSwipeDelayMs()
             oneBrowseNextOcrAtMillis = now + BROWSE_FIRST_OCR_DELAY_MS
             handler.postDelayed(
                 { scheduleCapture() },
@@ -2040,46 +2072,37 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     }
 
     private fun swipeBrowseForOneTask() {
-        val width = resources.displayMetrics.widthPixels
-        val height = resources.displayMetrics.heightPixels
-
-        val startX = Random.nextInt(
-            (width / 5).coerceAtLeast(1),
-            (width / 2).coerceAtLeast(2),
-        )
-        val startY = Random.nextInt(
-            (height * 0.62f).toInt().coerceAtLeast(1),
-            (height * 0.86f).toInt().coerceAtLeast(2),
-        )
-        val endXMin = (startX - 100).coerceAtLeast(1)
-        val endXMax = (startX + 20).coerceAtMost(width - 1)
-        val endX = if (endXMax > endXMin) {
-            Random.nextInt(endXMin, endXMax + 1)
-        } else {
-            endXMin
+        if (
+            oneBrowseStage != OneBrowseStage.BROWSING ||
+            oneBrowseOcrInFlight ||
+            oneBrowsePageTransitionPending
+        ) {
+            return
         }
-        val endY = Random.nextInt(
-            (height * 0.16f).toInt().coerceAtLeast(1),
-            (height * 0.52f).toInt().coerceAtLeast(2),
-        )
-        val durationMs = Random.nextLong(250L, 501L)
 
+        val plan = BrowsePacing.createSwipePlan(
+            screenWidth = resources.displayMetrics.widthPixels,
+            screenHeight = resources.displayMetrics.heightPixels,
+        )
         val queued = actionExecutor.swipe(
-            startX = startX,
-            startY = startY,
-            endX = endX,
-            endY = endY,
-            durationMs = durationMs,
+            startX = plan.startX,
+            startY = plan.startY,
+            endX = plan.endX,
+            endY = plan.endY,
+            durationMs = plan.durationMs,
         ) { result ->
             publishActionResult("v0.5 Browse Swipe", result)
         }
         if (queued) {
+            oneBrowseSwipeCount += 1
+            oneBrowseLog(
+                "浏览滑动 #" + oneBrowseSwipeCount +
+                    " dy=" + (plan.startY - plan.endY) +
+                    " duration=" + plan.durationMs + "ms",
+            )
             invalidateObservationForAction("one_task_browse_swipe")
         }
     }
-
-    private fun nextBrowseSwipeDelayMs(): Long =
-        Random.nextLong(500L, 901L)
 
     private fun runOneBrowseOcrCheck() {
         if (oneBrowseStage != OneBrowseStage.BROWSING || oneBrowseOcrInFlight) {
@@ -2087,6 +2110,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
 
         oneBrowseOcrInFlight = true
+        oneBrowseOcrAttemptCount += 1
         captureOcrSnapshot { result ->
             oneBrowseOcrInFlight = false
             if (oneBrowseStage != OneBrowseStage.BROWSING) {
@@ -2117,6 +2141,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                                 "browse_next_task_ocr",
                             )
                         ) {
+                            markBrowsePageTransition()
                             resetBrowseTimerAfterHop()
                             return@onSuccess
                         }
@@ -2165,15 +2190,23 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             "browse_next_task_xml",
         )
         if (queued) {
+            markBrowsePageTransition()
             resetBrowseTimerAfterHop()
         }
         return queued
     }
 
+    private fun markBrowsePageTransition() {
+        oneBrowsePageTransitionPending = true
+        oneBrowseTransitionAfterObservationId =
+            ObserverState.latestExternalObservation?.id ?: -1L
+    }
+
     private fun resetBrowseTimerAfterHop() {
         val now = System.currentTimeMillis()
         oneBrowseStartedAtMillis = now
-        oneBrowseNextSwipeAtMillis = now + SEARCH_DISCOVERY_SETTLE_MS
+        oneBrowseNextSwipeAtMillis =
+            now + BrowsePacing.nextFirstSwipeDelayMs()
         oneBrowseNextOcrAtMillis = now + BROWSE_FIRST_OCR_DELAY_MS
         oneBrowseSearchDiscoveryAttempted = false
         handler.postDelayed(
@@ -2546,6 +2579,16 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(returnWatchdog)
         handler.removeCallbacks(taskTransitionWatchdog)
         handler.removeCallbacks(externalTaskWatchdog)
+        if (
+            oneBrowseStage == OneBrowseStage.BROWSING ||
+            oneBrowseSwipeCount > 0 ||
+            oneBrowseOcrAttemptCount > 0
+        ) {
+            oneBrowseLog(
+                "浏览统计 swipes=" + oneBrowseSwipeCount +
+                    " ocrAttempts=" + oneBrowseOcrAttemptCount,
+            )
+        }
         oneBrowseReturnShouldSucceed = shouldSucceed
         oneBrowseStage = OneBrowseStage.RETURNING
         oneBrowseStageDeadlineMillis =
@@ -2657,6 +2700,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(taskTransitionWatchdog)
         handler.removeCallbacks(externalTaskWatchdog)
         taskListOcrInFlight = false
+        oneBrowsePageTransitionPending = false
         oneBrowseStage =
             if (success) OneBrowseStage.DONE else OneBrowseStage.FAILED
         oneBrowseLastMessage = message
