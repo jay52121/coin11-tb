@@ -1637,6 +1637,18 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     return
                 }
             }
+
+            oneBrowseLog(
+                "外部任务已离开目标包 " + session.packageName +
+                    "，转入恢复流程；current=" +
+                    (observation.packageName ?: "(null)") +
+                    " rawPage=" + (pageType?.wireName ?: "(none)"),
+            )
+            oneBrowseStage = OneBrowseStage.EXTERNAL_RECOVERING
+            oneBrowseStageDeadlineMillis =
+                System.currentTimeMillis() + EXTERNAL_RECOVERY_TIMEOUT_MS
+            externalRecoveryBackCount = 0
+            return
         }
 
         if (externalTaskSwipeCount < EXTERNAL_SWIPE_COUNT) {
@@ -2077,7 +2089,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         val now = System.currentTimeMillis()
         if (now > until) {
-            prefs.edit().remove(DEBUG_COIN_MAINLINE_UNTIL).apply()
+            prefs.edit()
+                .remove(DEBUG_COIN_MAINLINE_UNTIL)
+                .remove(DEBUG_COIN_MAINLINE_USER_ID)
+                .apply()
             Log.w(ONE_TASK_TAG, "queued coin mainline expired")
             return
         }
