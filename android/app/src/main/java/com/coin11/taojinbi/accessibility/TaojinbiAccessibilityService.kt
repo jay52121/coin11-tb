@@ -1670,6 +1670,27 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         observation: com.coin11.taojinbi.observation.Observation,
         ocrSnapshot: OcrSnapshot?,
     ) {
+        if (
+            ocrSnapshot != null &&
+            !ocrLooksLikeTaskList(ocrSnapshot)
+        ) {
+            oneBrowseLog(
+                "XML/OCR无任务候选且OCR确认当前不像任务列表；不下翻，恢复淘金币入口",
+            )
+
+            val latestRecognition = RecognitionState.latest
+                ?.takeIf { it.observationId == observation.id }
+                ?.result
+                ?.pageType
+            if (latestRecognition == PageType.COIN_HOME) {
+                oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                enterTaskListForOneBrowse(observation)
+            } else {
+                restartCoinHomeForMainline(observation.id)
+            }
+            return
+        }
+
         val bottom =
             CoinTaskCandidateFinder.isTaskListAtBottom(
                 observation,

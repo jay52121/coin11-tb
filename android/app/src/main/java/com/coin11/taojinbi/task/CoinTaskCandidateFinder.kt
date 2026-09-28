@@ -65,7 +65,7 @@ object CoinTaskCandidateFinder {
         val nodes = observation.nodes
             .filter { it.enabled && hasUsableBounds(it.bounds) }
 
-        return nodes
+        val actionCandidate = nodes
             .mapNotNull { node -> toCandidate(nodes, node, policy, "xml") }
             .filter { candidate ->
                 candidate.clickKey !in invalidClickKeys &&
@@ -76,6 +76,17 @@ object CoinTaskCandidateFinder {
                     .thenBy { it.bounds.left },
             )
             .firstOrNull()
+
+        if (actionCandidate != null) {
+            return actionCandidate
+        }
+
+        return findClickableRowCandidate(
+            nodes = nodes,
+            clickCounts = clickCounts,
+            invalidClickKeys = invalidClickKeys,
+            policy = policy,
+        )
     }
 
     fun findNextFromOcr(
@@ -316,10 +327,14 @@ object CoinTaskCandidateFinder {
         }
 
         val context = rowContext(nodes, node).ifBlank { action }
+        val targetBounds = smallestClickableContainer(
+            nodes = nodes,
+            childBounds = node.bounds,
+        ) ?: node.bounds
         return candidateFromText(
             action = action,
             context = context,
-            bounds = node.bounds,
+            bounds = targetBounds,
             policy = policy,
             rewardRegex = safeRegex(policy.rewardButtonPattern),
             source = source,
@@ -361,6 +376,109 @@ object CoinTaskCandidateFinder {
             source = source,
         )
     }
+
+    private fun findClickableRowCandidate(
+        nodes: List<NodeSnapshot>,
+        clickCounts: Map<String, Int>,
+        invalidClickKeys: Set<String>,
+        policy: CoinTaskPolicy,
+    ): CoinTaskCandidate? {
+        val screenWidth = nodes.maxOfOrNull { it.bounds.right }
+            ?.coerceAtLeast(1)
+            ?: return null
+        val actionRegex = safeRegex(policy.actionTextPattern)
+        val rewardRegex = safeRegex(policy.rewardButtonPattern)
+
+        return nodes
+            .asSequence()
+            .filter { it.clickable && it.enabled && hasUsableBounds(it.bounds) }
+            .filter { row ->
+                val width = row.bounds.right - row.bounds.left
+                val height = row.bounds.bottom - row.bounds.top
+                row.bounds.top >= ROW_MIN_TOP &&
+                    width >= (screenWidth * ROW_MIN_WIDTH_RATIO).toInt() &&
+                    height in ROW_MIN_HEIGHT..ROW_MAX_HEIGHT
+            }
+            .mapNotNull { row ->
+                val rowNodes = nodes
+                    .asSequence()
+                    .filter { it.index != row.index }
+                    .filter { contains(row.bounds, it.bounds) }
+                    .toList()
+                val texts = rowNodes
+                    .map(::nodeText)
+                    .filter { it.isNotBlank() }
+                    .filterNot { it.startsWith("O1CN") }
+                if (texts.isEmpty()) {
+                    return@mapNotNull null
+                }
+
+                val combined = texts.joinToString(" ")
+                val actionNode = rowNodes
+                    .filter { nodeText(it).isNotBlank() }
+                    .filter { node ->
+                        node.bounds.left >= (screenWidth * ACTION_RIGHT_RATIO).toInt() &&
+                            actionRegex.containsMatchIn(nodeText(node))
+                    }
+                    .minByOrNull { it.bounds.top }
+
+                val hasRewardMarker = texts.any { REWARD_MARKER_REGEX.matches(it.trim()) }
+                if (actionNode == null && !hasRewardMarker) {
+                    return@mapNotNull null
+                }
+
+                val action = actionNode?.let(::nodeText) ?: "任务行"
+                candidateFromText(
+                    action = action,
+                    context = combined,
+                    bounds = row.bounds,
+                    policy = policy,
+                    rewardRegex = rewardRegex,
+                    source = "row",
+                )
+            }
+            .filter { candidate ->
+                candidate.clickKey !in invalidClickKeys &&
+                    (clickCounts[candidate.key] ?: 0) < candidate.clickLimit
+            }
+            .sortedWith(
+                compareBy<CoinTaskCandidate> { it.bounds.top }
+                    .thenBy { it.bounds.left },
+            )
+            .firstOrNull()
+    }
+
+    private fun smallestClickableContainer(
+        nodes: List<NodeSnapshot>,
+        childBounds: IntRect,
+    ): IntRect? =
+        nodes
+            .asSequence()
+            .filter { it.clickable && it.enabled && hasUsableBounds(it.bounds) }
+            .filter { contains(it.bounds, childBounds) }
+            .filter { container ->
+                val width = container.bounds.right - container.bounds.left
+                val height = container.bounds.bottom - container.bounds.top
+                width >= childBounds.right - childBounds.left &&
+                    height >= childBounds.bottom - childBounds.top &&
+                    height <= CLICKABLE_CONTAINER_MAX_HEIGHT
+            }
+            .minWithOrNull(
+                compareBy<NodeSnapshot> {
+                    (it.bounds.right - it.bounds.left) *
+                        (it.bounds.bottom - it.bounds.top)
+                }.thenBy { it.depth },
+            )
+            ?.bounds
+
+    private fun contains(
+        outer: IntRect,
+        inner: IntRect,
+    ): Boolean =
+        outer.left <= inner.left &&
+            outer.top <= inner.top &&
+            outer.right >= inner.right &&
+            outer.bottom >= inner.bottom
 
     private fun excludedByRuleWords(
         context: String,
@@ -432,6 +550,12 @@ object CoinTaskCandidateFinder {
 
     private const val ROW_Y_TOLERANCE = 130
     private const val OCR_ROW_Y_TOLERANCE = 115
+    private const val ROW_MIN_TOP = 180
+    private const val ROW_MIN_HEIGHT = 55
+    private const val ROW_MAX_HEIGHT = 560
+    private const val ROW_MIN_WIDTH_RATIO = 0.45f
+    private const val ACTION_RIGHT_RATIO = 0.68f
+    private const val CLICKABLE_CONTAINER_MAX_HEIGHT = 560
     private const val DEFAULT_ACTION_PATTERN =
         "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐"
     private val DEFAULT_EXCLUDE_WORDS =
@@ -449,6 +573,7 @@ object CoinTaskCandidateFinder {
         Regex("[（(](\\d+)/(\\d+)[）)]")
     private val SHARE_BONUS_NOISE_REGEX =
         Regex("第\\d+笔[\\d.]+%?\\s*分享助力\\s*hd_bonus_progress_bar_text_target")
+    private val REWARD_MARKER_REGEX = Regex("^\\+\\d+$")
     private val OCR_BOTTOM_EXTRA_WORDS = listOf(
         "注：以上金币额",
         "以上奖励均为最高奖励",

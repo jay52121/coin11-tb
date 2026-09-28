@@ -211,6 +211,40 @@ class CoinTaskCandidateFinderTest {
         )
     }
 
+    @Test
+    fun usesSmallestClickableContainerForActionText() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation(
+                node(0, "浏览商品(0/1)", 100, 400, 760, 500),
+                node(1, null, 860, 390, 1220, 520, clickable = true),
+                node(2, "去完成", 920, 410, 1160, 500),
+            ),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertEquals(IntRect(860, 390, 1220, 520), candidate?.bounds)
+    }
+
+    @Test
+    fun clickableRowFallbackMatchesMacRowCandidate() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation(
+                node(0, null, 60, 360, 1210, 620, clickable = true),
+                node(1, "浏览会场(0/1)", 100, 400, 700, 490),
+                node(2, "+10", 730, 500, 820, 560),
+            ),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertNotNull(candidate)
+        assertEquals("row", candidate!!.source)
+        assertEquals(IntRect(60, 360, 1210, 620), candidate.bounds)
+    }
+
     private fun observation(vararg nodes: NodeSnapshot) = Observation(
         id = 1L,
         capturedAtMillis = 1L,
@@ -240,11 +274,12 @@ class CoinTaskCandidateFinderTest {
 
     private fun node(
         index: Int,
-        text: String,
+        text: String?,
         left: Int,
         top: Int,
         right: Int,
         bottom: Int,
+        clickable: Boolean = false,
     ) = NodeSnapshot(
         index = index,
         depth = 1,
@@ -253,7 +288,7 @@ class CoinTaskCandidateFinderTest {
         viewId = null,
         className = "android.widget.TextView",
         bounds = IntRect(left, top, right, bottom),
-        clickable = false,
+        clickable = clickable,
         scrollable = false,
         enabled = true,
         selected = false,
