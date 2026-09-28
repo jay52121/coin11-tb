@@ -95,12 +95,11 @@ object ShizukuBridge {
         )
     }
 
-    fun openCoinAsUser(userId: Int, url: String) {
+    fun openCoinAsUser(userId: Int, url: String): Boolean =
         runCommand(
             label = "启动淘金币 user $userId",
             command = "am start --user $userId -a android.intent.action.VIEW -d ${shQuote(url)} -p com.taobao.taobao",
         )
-    }
 
     fun queryForegroundActivity() {
         runCommand(
@@ -109,7 +108,7 @@ object ShizukuBridge {
         )
     }
 
-    private fun runCommand(label: String, command: String) {
+    private fun runCommand(label: String, command: String): Boolean {
         val ready = runCatching {
             Shizuku.pingBinder() &&
                 Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
@@ -117,7 +116,7 @@ object ShizukuBridge {
 
         if (!ready) {
             CapabilityState.publish(label, "Shizuku 未连接或未授权。")
-            return
+            return false
         }
 
         executor.execute {
@@ -140,6 +139,7 @@ object ShizukuBridge {
                 CapabilityState.publish(label, error.stackTraceToString())
             }
         }
+        return true
     }
 
     /**

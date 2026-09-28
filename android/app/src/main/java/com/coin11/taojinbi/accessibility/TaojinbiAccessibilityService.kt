@@ -1353,6 +1353,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             return "accepted run_coin_mainline queued awaiting service/coin page"
         }
 
+        fun debugClearQueuedCoinMainline(context: Context) {
+            context.getSharedPreferences(
+                DEBUG_REQUEST_PREFS,
+                Context.MODE_PRIVATE,
+            ).edit()
+                .remove(DEBUG_COIN_MAINLINE_UNTIL)
+                .apply()
+        }
+
         private fun armActionOnNextCoinObservation(type: PendingActionType): Boolean {
             if (instance == null) {
                 return false
