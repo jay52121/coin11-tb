@@ -29,7 +29,10 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "run_one_browse_task" ->
                 TaojinbiAccessibilityService.debugStartOneBrowseTask()
             "run_coin_mainline" -> {
-                val queued = TaojinbiAccessibilityService.debugQueueCoinMainline(context)
+                val queued = TaojinbiAccessibilityService.debugQueueCoinMainline(
+                    context,
+                    TARGET_USER_ID,
+                )
                 if (queued.contains("queued")) {
                     val launch = ShizukuBridge.openCoinAsUserWhenReady(
                         TARGET_USER_ID,

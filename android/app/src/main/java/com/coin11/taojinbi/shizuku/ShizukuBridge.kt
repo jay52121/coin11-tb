@@ -96,9 +96,17 @@ object ShizukuBridge {
     }
 
     fun forceStopTaobao(userId: Int) {
-        runCommand(
-            label = "force-stop 淘宝 user $userId",
-            command = "am force-stop --user $userId com.taobao.taobao",
+        forceStopPackage(userId, "com.taobao.taobao")
+    }
+
+    fun forceStopPackage(userId: Int, packageName: String): Boolean {
+        if (!PACKAGE_NAME_REGEX.matches(packageName)) {
+            CapabilityState.publish("force-stop", "非法包名：" + packageName)
+            return false
+        }
+        return runCommand(
+            label = "force-stop " + packageName + " user " + userId,
+            command = "am force-stop --user " + userId + " " + packageName,
         )
     }
 
@@ -292,4 +300,5 @@ object ShizukuBridge {
 
     private const val TAG = "TaojinbiShizuku"
     private const val SHIZUKU_RETRY_INTERVAL_MS = 250L
+    private val PACKAGE_NAME_REGEX = Regex("[A-Za-z0-9_.]+")
 }

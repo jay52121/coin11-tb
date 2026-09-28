@@ -67,6 +67,30 @@ class CoinTaskCandidateFinderTest {
         assertNull(second)
     }
 
+    @Test
+    fun progressLabelKeepsSameTaskKeyAcrossDifferentActionText() {
+        val firstObservation = observation(
+            node(0, "头条极速版刷视频(0/1)", 100, 400, 760, 500),
+            node(1, "去完成", 900, 410, 1200, 500),
+        )
+        val first = CoinTaskCandidateFinder.findNext(
+            firstObservation,
+            handledKeys = emptySet(),
+        )!!
+
+        val secondObservation = observation(
+            node(0, "头条极速版刷视频(0/1)", 100, 400, 760, 500),
+            node(1, "点击去逛", 900, 410, 1200, 500),
+        )
+        val second = CoinTaskCandidateFinder.findNext(
+            secondObservation,
+            handledKeys = setOf(first.key),
+        )
+
+        assertEquals("progress:头条极速版刷视频(0/1)", first.key)
+        assertNull(second)
+    }
+
     private fun observation(vararg nodes: NodeSnapshot) = Observation(
         id = 1L,
         capturedAtMillis = 1L,

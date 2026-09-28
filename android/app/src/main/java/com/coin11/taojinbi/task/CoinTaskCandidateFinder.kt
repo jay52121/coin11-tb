@@ -119,7 +119,13 @@ object CoinTaskCandidateFinder {
 
         val compactContext = context.replace(Regex("\\s+"), "")
         val compactAction = action.replace(Regex("\\s+"), "")
-        val key = (compactAction + "|" + compactContext).take(180)
+        val progressKey = TASK_PROGRESS_REGEX
+            .findAll(context.replace(Regex("\\s+"), " "))
+            .map { it.groupValues[1].replace(Regex("\\s+"), "") }
+            .toList()
+            .lastOrNull()
+        val key = progressKey?.let { "progress:" + it }
+            ?: (compactAction + "|" + compactContext).take(180)
 
         return CoinTaskCandidate(
             key = key,
@@ -156,4 +162,6 @@ object CoinTaskCandidateFinder {
         bounds.right > bounds.left && bounds.bottom > bounds.top
 
     private const val ROW_Y_TOLERANCE = 130
+    private val TASK_PROGRESS_REGEX =
+        Regex("([^\\s，。；;（）()]{2,40}[（(]\\d+/\\d+[）)])")
 }

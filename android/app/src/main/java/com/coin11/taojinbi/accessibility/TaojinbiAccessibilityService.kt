@@ -32,6 +32,7 @@ import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskKind
 import com.coin11.taojinbi.task.TaskPageContext
+import com.coin11.taojinbi.shizuku.ShizukuBridge
 
 class TaojinbiAccessibilityService : AccessibilityService() {
 
@@ -57,6 +58,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         WAITING_BROWSE_PAGE,
         WAITING_REWARD_RESULT,
         BROWSING,
+        EXTERNAL_TASK,
+        EXTERNAL_RECOVERING,
         RETURNING,
         DONE,
         FAILED,
@@ -93,6 +96,21 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var currentCoinTaskKey = ""
     private var supportedCoinTasksCompleted = 0
     private var skippedCoinTasks = 0
+    private var coinMainlineTargetUserId = -1
+
+    private data class ExternalTaskSession(
+        val packageName: String,
+        val taskKey: String,
+        val taskDescription: String,
+        val startedAtMillis: Long,
+        val userId: Int,
+    )
+
+    private var externalTaskSession: ExternalTaskSession? = null
+    private var externalTaskSwipeCount = 0
+    private var externalRecoveryBackCount = 0
+    private var externalRecoveryFallbackLaunched = false
+    private var externalRecoveryPendingCompletion = false
 
     private val coinEntryWaitRunnable = Runnable {
         runCoinEntryWaitTick()
@@ -106,6 +124,22 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             runReturnWatchdogTick()
             if (oneBrowseStage == OneBrowseStage.RETURNING) {
                 handler.postDelayed(this, RETURN_WATCHDOG_INTERVAL_MS)
+            }
+        }
+    }
+
+    private val externalTaskWatchdog = object : Runnable {
+        override fun run() {
+            when (oneBrowseStage) {
+                OneBrowseStage.EXTERNAL_TASK -> runExternalTaskTick()
+                OneBrowseStage.EXTERNAL_RECOVERING -> runExternalRecoveryTick()
+                else -> return
+            }
+            if (
+                oneBrowseStage == OneBrowseStage.EXTERNAL_TASK ||
+                oneBrowseStage == OneBrowseStage.EXTERNAL_RECOVERING
+            ) {
+                handler.postDelayed(this, EXTERNAL_WATCHDOG_INTERVAL_MS)
             }
         }
     }
@@ -324,7 +358,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun startCoinMainline(): String {
+    private fun startCoinMainline(targetUserId: Int): String {
         if (
             oneBrowseStage != OneBrowseStage.IDLE &&
             oneBrowseStage != OneBrowseStage.DONE &&
@@ -346,10 +380,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         resetOneBrowseState()
         resetOneBrowseTrace("run_coin_mainline")
         coinMainlineMode = true
+        coinMainlineTargetUserId = targetUserId
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseLog(
             "v0.5 mainline start Observation #" + observation.id +
-                " page=" + recognition.result.pageType.wireName,
+                " page=" + recognition.result.pageType.wireName +
+                " user=" + targetUserId,
         )
 
         return when (recognition.result.pageType) {
@@ -378,6 +414,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(coinEntryWaitRunnable)
         handler.removeCallbacks(returnWatchdog)
+        handler.removeCallbacks(externalTaskWatchdog)
+        handler.removeCallbacks(externalTaskWatchdog)
         oneBrowseStage = OneBrowseStage.IDLE
         oneBrowseStageDeadlineMillis = 0L
         oneBrowseNextSwipeAtMillis = 0L
@@ -403,6 +441,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         currentCoinTaskKey = ""
         supportedCoinTasksCompleted = 0
         skippedCoinTasks = 0
+        coinMainlineTargetUserId = -1
+        externalTaskSession = null
+        externalTaskSwipeCount = 0
+        externalRecoveryBackCount = 0
+        externalRecoveryFallbackLaunched = false
+        externalRecoveryPendingCompletion = false
     }
 
     private fun onOneBrowseObservation(
@@ -459,7 +503,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         shouldSucceed = true,
                         reason = "点击后直接出现 task_done",
                     )
-                    PageType.EXTERNAL_APP,
+                    PageType.EXTERNAL_APP -> {
+                        if (!startExternalTaskFlow(observation)) {
+                            startOneBrowseReturn(
+                                shouldSucceed = false,
+                                reason = "外部任务未能建立安全会话",
+                            )
+                        }
+                    }
                     PageType.QUIZ,
                     PageType.SHOP_SUBSCRIBE_TASK,
                     PageType.GOOD_SHOP_PAGE,
@@ -489,7 +540,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
                         enterTaskListForOneBrowse(observation)
                     }
-                    PageType.EXTERNAL_APP,
+                    PageType.EXTERNAL_APP -> {
+                        if (!startExternalTaskFlow(observation)) {
+                            startOneBrowseReturn(
+                                shouldSucceed = false,
+                                reason = "奖励动作进入外部App但未能建立安全会话",
+                            )
+                        }
+                    }
                     PageType.QUIZ,
                     PageType.SHOP_SUBSCRIBE_TASK,
                     PageType.GOOD_SHOP_PAGE,
@@ -519,7 +577,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         success = true,
                         message = "浏览任务自动回到 daily_task_list",
                     )
-                    PageType.EXTERNAL_APP,
+                    PageType.EXTERNAL_APP -> {
+                        if (!startExternalTaskFlow(observation)) {
+                            startOneBrowseReturn(
+                                shouldSucceed = false,
+                                reason = "浏览中进入外部App但未能建立安全会话",
+                            )
+                        }
+                    }
                     PageType.QUIZ,
                     PageType.SHOP_SUBSCRIBE_TASK,
                     PageType.GOOD_SHOP_PAGE,
@@ -529,6 +594,16 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     )
                     else -> Unit
                 }
+            }
+
+            OneBrowseStage.EXTERNAL_TASK -> {
+                if (pageType != PageType.EXTERNAL_APP) {
+                    handleExternalRecoveryObservation(observation, pageType)
+                }
+            }
+
+            OneBrowseStage.EXTERNAL_RECOVERING -> {
+                handleExternalRecoveryObservation(observation, pageType)
             }
 
             OneBrowseStage.RETURNING -> {
@@ -1150,6 +1225,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         observation: com.coin11.taojinbi.observation.Observation,
     ) {
         handler.removeCallbacks(coinEntryWaitRunnable)
+        if (externalRecoveryPendingCompletion) {
+            externalRecoveryPendingCompletion = false
+            finishCurrentTaskOnDailyList(
+                observation = observation,
+                success = true,
+                message = "外部任务App已关闭并恢复任务列表",
+            )
+            return
+        }
         oneBrowseStage = OneBrowseStage.FINDING_TASK
         oneBrowseLog(
             "进入 daily_task_list Observation #" + observation.id,
@@ -1336,6 +1420,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         success: Boolean,
         message: String,
     ) {
+        handler.removeCallbacks(externalTaskWatchdog)
+        externalTaskSession = null
+        externalRecoveryPendingCompletion = false
         if (currentCoinTaskKey.isNotBlank()) {
             handledCoinTaskKeys += currentCoinTaskKey
         }
@@ -1465,6 +1552,313 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private fun startExternalTaskFlow(
+        observation: com.coin11.taojinbi.observation.Observation,
+    ): Boolean {
+        if (!coinMainlineMode || coinMainlineTargetUserId < 0) {
+            oneBrowseLog("外部任务未启动：没有主线 user 上下文")
+            return false
+        }
+
+        val packageName = observation.packageName ?: return false
+        if (
+            packageName == TAOBAO_PACKAGE ||
+            packageName == LAUNCHER_PACKAGE ||
+            packageName in TRANSIENT_EXTERNAL_PACKAGES
+        ) {
+            oneBrowseLog(
+                "外部页不建立 kill 会话 package=" + packageName,
+            )
+            return false
+        }
+
+        val now = System.currentTimeMillis()
+        externalTaskSession = ExternalTaskSession(
+            packageName = packageName,
+            taskKey = currentCoinTaskKey,
+            taskDescription = oneBrowseTaskDescription,
+            startedAtMillis = now,
+            userId = coinMainlineTargetUserId,
+        )
+        externalTaskSwipeCount = 0
+        externalRecoveryBackCount = 0
+        externalRecoveryFallbackLaunched = false
+        externalRecoveryPendingCompletion = false
+        oneBrowseStage = OneBrowseStage.EXTERNAL_TASK
+        oneBrowseStageDeadlineMillis = now + EXTERNAL_TASK_MAX_MS
+
+        oneBrowseLog(
+            "记录外部任务会话 package=" + packageName +
+                " user=" + coinMainlineTargetUserId +
+                " task=" + oneBrowseTaskDescription,
+        )
+        handler.removeCallbacks(externalTaskWatchdog)
+        handler.postDelayed(
+            externalTaskWatchdog,
+            EXTERNAL_INITIAL_SETTLE_MS,
+        )
+        return true
+    }
+
+    private fun runExternalTaskTick() {
+        val session = externalTaskSession
+        if (session == null) {
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason = "外部任务会话丢失",
+            )
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - session.startedAtMillis > EXTERNAL_SESSION_MAX_AGE_MS) {
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason = "外部任务会话超过180秒",
+            )
+            return
+        }
+
+        scheduleCapture()
+        val observation = ObserverState.latestExternalObservation
+        val pageType = RecognitionState.latest
+            ?.takeIf { it.observationId == observation?.id }
+            ?.result
+            ?.pageType
+
+        if (
+            observation != null &&
+            ObserverState.latestObservationValid &&
+            observation.packageName != session.packageName
+        ) {
+            if (pageType != null) {
+                handleExternalRecoveryObservation(observation, pageType)
+                if (oneBrowseStage != OneBrowseStage.EXTERNAL_TASK) {
+                    return
+                }
+            }
+        }
+
+        if (externalTaskSwipeCount < EXTERNAL_SWIPE_COUNT) {
+            externalTaskSwipeCount += 1
+            oneBrowseLog(
+                "外部任务滚动 " + externalTaskSwipeCount +
+                    "/" + EXTERNAL_SWIPE_COUNT +
+                    " package=" + session.packageName,
+            )
+            swipeExternalTaskOnce()
+            return
+        }
+
+        val submitted = ShizukuBridge.forceStopPackage(
+            session.userId,
+            session.packageName,
+        )
+        if (!submitted) {
+            oneBrowseLog(
+                "Shizuku force-stop 提交失败 package=" +
+                    session.packageName,
+            )
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason = "外部任务 force-stop 提交失败",
+            )
+            return
+        }
+
+        oneBrowseLog(
+            "外部任务 force-stop 已提交 package=" +
+                session.packageName +
+                " user=" + session.userId,
+        )
+        oneBrowseStage = OneBrowseStage.EXTERNAL_RECOVERING
+        oneBrowseStageDeadlineMillis =
+            System.currentTimeMillis() + EXTERNAL_RECOVERY_TIMEOUT_MS
+        externalRecoveryBackCount = 0
+        externalRecoveryFallbackLaunched = false
+        scheduleCapture()
+    }
+
+    private fun swipeExternalTaskOnce() {
+        val width = resources.displayMetrics.widthPixels
+        val height = resources.displayMetrics.heightPixels
+        val queued = actionExecutor.swipe(
+            startX = width / 2,
+            startY = (height * 0.78f).toInt(),
+            endX = width / 2,
+            endY = (height * 0.38f).toInt(),
+            durationMs = 350L,
+        ) { result ->
+            publishActionResult("v0.5 External Swipe", result)
+        }
+        if (queued) {
+            invalidateObservationForAction("external_task_swipe")
+            handler.postDelayed(
+                { scheduleCapture() },
+                RETURN_CAPTURE_AFTER_BACK_MS,
+            )
+        }
+    }
+
+    private fun handleExternalRecoveryObservation(
+        observation: com.coin11.taojinbi.observation.Observation,
+        pageType: PageType,
+    ) {
+        if (
+            oneBrowseStage != OneBrowseStage.EXTERNAL_TASK &&
+            oneBrowseStage != OneBrowseStage.EXTERNAL_RECOVERING
+        ) {
+            return
+        }
+
+        when (pageType) {
+            PageType.DAILY_TASK_LIST -> {
+                oneBrowseLog(
+                    "外部任务恢复到 daily_task_list Observation #" +
+                        observation.id,
+                )
+                finishCurrentTaskOnDailyList(
+                    observation = observation,
+                    success = true,
+                    message = "外部任务App已关闭并回到 daily_task_list",
+                )
+            }
+
+            PageType.COIN_HOME -> {
+                oneBrowseLog(
+                    "外部任务恢复到 coin_home，重新进入任务列表",
+                )
+                externalRecoveryPendingCompletion = true
+                oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                enterTaskListForOneBrowse(observation)
+            }
+
+            else -> Unit
+        }
+    }
+
+    private fun runExternalRecoveryTick() {
+        val session = externalTaskSession
+        if (session == null) {
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason = "外部恢复会话丢失",
+            )
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        scheduleCapture()
+
+        val observation = ObserverState.latestExternalObservation
+        val pageType = RecognitionState.latest
+            ?.takeIf { it.observationId == observation?.id }
+            ?.result
+            ?.pageType
+
+        if (
+            observation != null &&
+            ObserverState.latestObservationValid &&
+            pageType != null
+        ) {
+            if (
+                pageType == PageType.DAILY_TASK_LIST ||
+                pageType == PageType.COIN_HOME
+            ) {
+                handleExternalRecoveryObservation(observation, pageType)
+                return
+            }
+
+            val packageName = observation.packageName
+            if (packageName == TAOBAO_PACKAGE) {
+                if (externalRecoveryBackCount < EXTERNAL_RECOVERY_BACK_LIMIT) {
+                    externalRecoveryBackCount += 1
+                    oneBrowseLog(
+                        "关闭外部App后仍在淘宝承接页，Back #" +
+                            externalRecoveryBackCount +
+                            " rawPage=" + pageType.wireName,
+                    )
+                    globalBack()
+                    handler.postDelayed(
+                        { scheduleCapture() },
+                        RETURN_CAPTURE_AFTER_BACK_MS,
+                    )
+                    return
+                }
+            } else if (
+                packageName != null &&
+                packageName != session.packageName &&
+                packageName != LAUNCHER_PACKAGE &&
+                packageName !in TRANSIENT_EXTERNAL_PACKAGES
+            ) {
+                oneBrowseLog(
+                    "关闭目标App后停在其他外部App " + packageName +
+                        "；不杀无关App，改走淘金币入口恢复",
+                )
+                launchCoinHomeForExternalRecovery()
+                return
+            }
+
+            if (packageName == LAUNCHER_PACKAGE) {
+                oneBrowseLog("关闭外部App后到桌面，启动当前 user 淘金币入口")
+                launchCoinHomeForExternalRecovery()
+                return
+            }
+        }
+
+        if (now >= oneBrowseStageDeadlineMillis) {
+            if (!externalRecoveryFallbackLaunched) {
+                oneBrowseLog(
+                    "关闭外部App后恢复超时，使用淘金币入口恢复",
+                )
+                launchCoinHomeForExternalRecovery()
+                return
+            }
+
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason =
+                    "外部任务 force-stop 后仍未恢复任务列表 package=" +
+                        session.packageName,
+            )
+        }
+    }
+
+    private fun launchCoinHomeForExternalRecovery() {
+        val session = externalTaskSession
+        if (session == null) {
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason = "外部恢复时会话丢失",
+            )
+            return
+        }
+        if (externalRecoveryFallbackLaunched) {
+            return
+        }
+
+        externalRecoveryFallbackLaunched = true
+        externalRecoveryPendingCompletion = true
+        oneBrowseStage = OneBrowseStage.EXTERNAL_RECOVERING
+        oneBrowseStageDeadlineMillis =
+            System.currentTimeMillis() + EXTERNAL_RECOVERY_FALLBACK_TIMEOUT_MS
+
+        val submitted = ShizukuBridge.openCoinAsUser(
+            session.userId,
+            COIN_HOME_URL,
+        )
+        oneBrowseLog(
+            "外部恢复启动淘金币 user=" + session.userId +
+                " submitted=" + submitted,
+        )
+        if (!submitted) {
+            startOneBrowseReturn(
+                shouldSucceed = false,
+                reason = "外部恢复启动淘金币失败",
+            )
+        }
+    }
+
     private fun startOneBrowseReturn(
         shouldSucceed: Boolean,
         reason: String,
@@ -1479,6 +1873,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(returnWatchdog)
+        handler.removeCallbacks(externalTaskWatchdog)
         oneBrowseReturnShouldSucceed = shouldSucceed
         oneBrowseStage = OneBrowseStage.RETURNING
         oneBrowseStageDeadlineMillis =
@@ -1662,6 +2057,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             append(supportedCoinTasksCompleted)
             append(" skipped=")
             append(skippedCoinTasks)
+            append(" user=")
+            append(coinMainlineTargetUserId)
+            externalTaskSession?.let {
+                append(" external=")
+                append(it.packageName)
+            }
         }
 
     private fun runQueuedCoinMainlineIfReady(
@@ -1689,8 +2090,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             return
         }
 
-        prefs.edit().remove(DEBUG_COIN_MAINLINE_UNTIL).apply()
-        val result = startCoinMainline()
+        val targetUserId = prefs.getInt(
+            DEBUG_COIN_MAINLINE_USER_ID,
+            DEFAULT_DEBUG_TARGET_USER_ID,
+        )
+        prefs.edit()
+            .remove(DEBUG_COIN_MAINLINE_UNTIL)
+            .remove(DEBUG_COIN_MAINLINE_USER_ID)
+            .apply()
+        val result = startCoinMainline(targetUserId)
         Log.i(
             ONE_TASK_TAG,
             "queued coin mainline start on Observation #" +
@@ -1910,10 +2318,28 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val MAX_TASK_LIST_SCROLLS = 4
         private const val MAX_MAINLINE_TASK_LIST_SCROLLS = 8
         private const val MAX_RETURN_BACKS = 5
+        private const val EXTERNAL_INITIAL_SETTLE_MS = 1_000L
+        private const val EXTERNAL_WATCHDOG_INTERVAL_MS = 1_000L
+        private const val EXTERNAL_TASK_MAX_MS = 12_000L
+        private const val EXTERNAL_SESSION_MAX_AGE_MS = 180_000L
+        private const val EXTERNAL_SWIPE_COUNT = 3
+        private const val EXTERNAL_RECOVERY_TIMEOUT_MS = 8_000L
+        private const val EXTERNAL_RECOVERY_FALLBACK_TIMEOUT_MS = 12_000L
+        private const val EXTERNAL_RECOVERY_BACK_LIMIT = 4
         private const val DEBUG_MAINLINE_QUEUE_TTL_MS = 30_000L
         private const val ONE_TASK_TRACE_FILE = "coin_mainline_trace.log"
         private const val DEBUG_REQUEST_PREFS = "debug_run_requests"
         private const val DEBUG_COIN_MAINLINE_UNTIL = "coin_mainline_until"
+        private const val DEBUG_COIN_MAINLINE_USER_ID = "coin_mainline_user_id"
+        private const val DEFAULT_DEBUG_TARGET_USER_ID = 999
+        private const val LAUNCHER_PACKAGE = "com.android.launcher"
+        private val TRANSIENT_EXTERNAL_PACKAGES = setOf(
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+            "com.lbe.security.miui",
+        )
+        private const val COIN_HOME_URL =
+            "https://pages-fast.m.taobao.com/wow/z/tmtjb/town/home?utparam=%7B%22ranger_buckets_native%22%3A%22tsp6443_32421_standardVersion%22%7D&spm=a2141.1.iconsv5.5&miniappSourceChannel=homepage&scm=1007.home_icon.lingjb.d&x-ssr=true&disableNav=YES&x-sec=wua&pha_h5=true&pha_nav=true&uniapp_id=1011525&uniapp_page=home&hd_from=tbHome"
         private val ENTRY_PROGRESS_REGEX = Regex("[（(]\\d+/\\d+[）)]")
 
         @Volatile
@@ -1973,7 +2399,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             instance?.startOneBrowseTask()
                 ?: "rejected run_one_browse_task: accessibility service not connected"
 
-        fun debugQueueCoinMainline(context: Context): String {
+        fun debugQueueCoinMainline(
+            context: Context,
+            targetUserId: Int,
+        ): String {
             val service = instance
             val observation = ObserverState.latestExternalObservation
             val recognition = RecognitionState.latest
@@ -1987,7 +2416,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         recognition.result.pageType == PageType.DAILY_TASK_LIST
                 )
             ) {
-                return service.startCoinMainline()
+                return service.startCoinMainline(targetUserId)
             }
 
             context.getSharedPreferences(
@@ -1997,6 +2426,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 .putLong(
                     DEBUG_COIN_MAINLINE_UNTIL,
                     System.currentTimeMillis() + DEBUG_MAINLINE_QUEUE_TTL_MS,
+                )
+                .putInt(
+                    DEBUG_COIN_MAINLINE_USER_ID,
+                    targetUserId,
                 )
                 .apply()
             return "accepted run_coin_mainline queued awaiting service/coin page"
@@ -2008,6 +2441,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 Context.MODE_PRIVATE,
             ).edit()
                 .remove(DEBUG_COIN_MAINLINE_UNTIL)
+                .remove(DEBUG_COIN_MAINLINE_USER_ID)
                 .apply()
         }
 
