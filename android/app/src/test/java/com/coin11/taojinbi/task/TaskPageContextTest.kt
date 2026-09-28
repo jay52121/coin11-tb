@@ -64,6 +64,27 @@ class TaskPageContextTest {
     }
 
     @Test
+    fun activeCoinHomeStillNeedsBrowseSignal() {
+        assertEquals(
+            PageType.COIN_HOME,
+            TaskPageContext.effectiveBrowsePageType(
+                rawPageType = PageType.COIN_HOME,
+                observation = observation("淘金币首页", "购物车"),
+                phase = BrowseContextPhase.ACTIVE,
+            ),
+        )
+
+        assertEquals(
+            PageType.TAOBAO_BROWSE_TASK,
+            TaskPageContext.effectiveBrowsePageType(
+                rawPageType = PageType.COIN_HOME,
+                observation = observation("淘金币首页", "浏览5秒"),
+                phase = BrowseContextPhase.ACTIVE,
+            ),
+        )
+    }
+
+    @Test
     fun doesNotOverrideTerminalTaskList() {
         assertEquals(
             PageType.DAILY_TASK_LIST,

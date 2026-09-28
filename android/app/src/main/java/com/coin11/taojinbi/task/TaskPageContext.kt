@@ -43,7 +43,10 @@ object TaskPageContext {
             return rawPageType
         }
 
-        if (phase == BrowseContextPhase.ACTIVE) {
+        if (
+            phase == BrowseContextPhase.ACTIVE &&
+            rawPageType != PageType.COIN_HOME
+        ) {
             return PageType.TAOBAO_BROWSE_TASK
         }
 
