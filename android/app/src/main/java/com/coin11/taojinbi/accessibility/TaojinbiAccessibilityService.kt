@@ -1541,6 +1541,23 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         candidate: com.coin11.taojinbi.task.CoinTaskCandidate,
         sourceObservationId: Long,
     ): Boolean {
+        val latestObservation = ObserverState.latestExternalObservation
+        if (
+            !ObserverState.latestObservationValid ||
+            latestObservation?.id != sourceObservationId
+        ) {
+            oneBrowseLog(
+                "候选快照已过期，拒绝点击 sourceObservation=#" +
+                    sourceObservationId +
+                    " latest=" +
+                    (latestObservation?.id?.let { "#" + it } ?: "(none)"),
+            )
+            resumeTaskFindingFresh(
+                latestObservation?.id ?: sourceObservationId,
+            )
+            return false
+        }
+
         val screenHeight = resources.displayMetrics.heightPixels
         if (
             candidate.kind == CoinTaskKind.REWARD &&
@@ -1642,9 +1659,17 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     policy = coinTaskPolicy(),
                 )
                 if (candidate != null) {
+                    val ocrObservationId = snapshot.observationId
+                    if (ocrObservationId == null) {
+                        oneBrowseLog(
+                            "OCR候选没有有效源Observation，拒绝点击并重新采样",
+                        )
+                        resumeTaskFindingFresh(observation.id)
+                        return@onSuccess
+                    }
                     clickCoinTaskCandidate(
                         candidate = candidate,
-                        sourceObservationId = observation.id,
+                        sourceObservationId = ocrObservationId,
                     )
                     return@onSuccess
                 }
