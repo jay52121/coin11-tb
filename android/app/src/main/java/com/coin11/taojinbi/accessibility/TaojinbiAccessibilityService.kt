@@ -638,7 +638,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             OneBrowseStage.WAITING_BROWSE_PAGE -> {
                 when (effectivePageType) {
                     PageType.DAILY_TASK_LIST -> {
-                        if (taskTransitionSettled()) {
+                        if (taskTransitionSettled(observation)) {
                             markCurrentTaskClickInvalid(
                                 observation,
                                 "点击后仍在 daily_task_list",
@@ -646,7 +646,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         }
                     }
                     PageType.COIN_HOME -> {
-                        if (taskTransitionSettled()) {
+                        if (taskTransitionSettled(observation)) {
                             oneBrowseLog(
                                 "任务点击后 settle 完成仍为 coin_home，按Mac语义重新进入任务列表",
                             )
@@ -693,7 +693,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             OneBrowseStage.WAITING_REWARD_RESULT -> {
                 when (pageType) {
                     PageType.DAILY_TASK_LIST -> {
-                        if (taskTransitionSettled()) {
+                        if (taskTransitionSettled(observation)) {
                             finishCurrentTaskOnDailyList(
                                 observation = observation,
                                 success = true,
@@ -702,7 +702,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         }
                     }
                     PageType.COIN_HOME -> {
-                        if (taskTransitionSettled()) {
+                        if (taskTransitionSettled(observation)) {
                             oneBrowseLog(
                                 "奖励点击后 settle 完成仍为 coin_home，重新进入任务列表",
                             )
@@ -1925,8 +1925,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun taskTransitionSettled(): Boolean =
-        System.currentTimeMillis() - oneBrowseTaskClickAtMillis >=
+    private fun taskTransitionSettled(
+        observation: com.coin11.taojinbi.observation.Observation,
+    ): Boolean =
+        observation.capturedAtMillis - oneBrowseTaskClickAtMillis >=
             TASK_TRANSITION_MIN_SETTLE_MS
 
     private fun clearCurrentCoinTask() {
