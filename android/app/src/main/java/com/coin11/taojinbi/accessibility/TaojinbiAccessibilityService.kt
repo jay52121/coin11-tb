@@ -1813,13 +1813,27 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         restartEntryAfterObservationId = sourceObservationId
         oneBrowseStageDeadlineMillis =
             System.currentTimeMillis() + RESTART_ENTRY_TIMEOUT_MS
+        expandedMoreCoinTasks = false
+        oneBrowseTaskListScrolls = 0
+
+        val stopped = ShizukuBridge.forceStopPackage(
+            coinMainlineTargetUserId,
+            TAOBAO_PACKAGE,
+        )
+        if (!stopped) {
+            failOneBrowse("重开淘金币前 force-stop 淘宝提交失败")
+            return
+        }
+
         val submitted = ShizukuBridge.openCoinAsUser(
             coinMainlineTargetUserId,
             COIN_HOME_URL,
         )
         oneBrowseLog(
-            "重开淘金币 user=" + coinMainlineTargetUserId +
-                " submitted=" + submitted,
+            "按Mac stop=True语义重开淘金币 user=" +
+                coinMainlineTargetUserId +
+                " forceStop=" + stopped +
+                " launch=" + submitted,
         )
         if (!submitted) {
             failOneBrowse("重开淘金币提交失败")

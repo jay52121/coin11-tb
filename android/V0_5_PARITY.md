@@ -21,7 +21,7 @@ Scope rule: v0.5 is the Mac **ordinary 淘金币 mainline control path**. Specia
 | Task-list confirmation | before blind scrolling, re-confirm page is actually a task list | Implemented via OCR composite task-list recognition; non-task-list goes to current-user coin-entry recovery instead of scrolling. |
 | Task-list bottom | XML bottom words + OCR bottom words | Implemented, including Mac OCR footer markers. |
 | Expand more | expand once at bottom; XML/clickable-container first, OCR fallback | Implemented. |
-| Scroll exhaustion | <=8 scrolls; if still not bottom, clear click state and reopen current-user coin entry | Implemented with Shizuku target-user context and fresh-Observation gate. |
+| Scroll exhaustion | <=8 scrolls; if still not bottom, clear click state and `open_coin_home_direct(stop=True)` | Implemented: clear click state, reset expand/scroll state, Shizuku force-stop target-user Taobao, then reopen coin entry behind a fresh-Observation gate. |
 | Browse done | first OCR after 8s, then every 2s; rule done targets; ignore generic 已得 on 淘宝购物清单 | Implemented. |
 | Browse swipe | human-like varying coordinates/duration/interval | Implemented with randomized Android gestures matching Mac ranges. |
 | Search browse | click first history/search-discovery item before browse timing | Implemented node-first; uses clickable containing target when available. |
