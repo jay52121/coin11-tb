@@ -1,5 +1,8 @@
 {
   "action_text_pattern": "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐",
+  "earn_more_words": ["赚更多金币"],
+  "earn_words": ["赚金币"],
+  "daily_version_words": ["回日常版"],
   "skip_task_extra_words": [],
   "done_words": ["已完成", "已领取", "已得", "任务已完成", "记得明天再来"],
   "search_browse_words": ["搜索后浏览立得奖励", "搜索有福利", "淘宝精选", "搜索发现", "历史搜索"],

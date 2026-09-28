@@ -49,22 +49,55 @@ object BrowseTaskCandidateFinder {
         "签到领金币",
     )
 
-    fun findCoinTaskEntry(observation: Observation): NodeSnapshot? =
+    fun findCoinTaskEntry(
+        observation: Observation,
+        earnMoreWords: List<String> = listOf("赚更多金币"),
+        earnWords: List<String> = listOf("赚金币"),
+    ): NodeSnapshot? =
+        findEarnMoreEntry(observation, earnMoreWords)
+            ?: findEarnEntry(observation, earnWords)
+
+    fun findEarnMoreEntry(
+        observation: Observation,
+        words: List<String> = listOf("赚更多金币"),
+    ): NodeSnapshot? =
         observation.nodes
             .asSequence()
             .filter { it.enabled && hasUsableBounds(it.bounds) }
             .mapNotNull { node ->
-                val text = nodeText(node).replace(" ", "")
-                val rank = when {
-                    text.contains("赚更多金币") -> 0
-                    text == "赚金币" -> 1
-                    else -> -1
+                val text = compact(nodeText(node))
+                val rank = words.indexOfFirst { word ->
+                    text.contains(compact(word))
                 }
                 if (rank < 0) null else Triple(rank, node.bounds.top, node)
             }
             .sortedWith(compareBy<Triple<Int, Int, NodeSnapshot>> { it.first }.thenBy { it.second })
             .map { it.third }
             .firstOrNull()
+
+    fun findEarnEntry(
+        observation: Observation,
+        words: List<String> = listOf("赚金币"),
+    ): NodeSnapshot? =
+        observation.nodes
+            .asSequence()
+            .filter { it.enabled && hasUsableBounds(it.bounds) }
+            .mapNotNull { node ->
+                val text = compact(nodeText(node))
+                val rank = words.indexOfFirst { word ->
+                    text == compact(word)
+                }
+                if (rank < 0) null else Triple(rank, node.bounds.top, node)
+            }
+            .sortedWith(compareBy<Triple<Int, Int, NodeSnapshot>> { it.first }.thenBy { it.second })
+            .map { it.third }
+            .firstOrNull()
+
+    fun findDailyVersionEntry(
+        observation: Observation,
+        words: List<String> = listOf("回日常版"),
+    ): NodeSnapshot? =
+        findFirstByWords(observation, words)
 
     fun findSignCoinEntry(observation: Observation): NodeSnapshot? =
         findFirstByWords(observation, signCoinWords)
@@ -153,6 +186,9 @@ object BrowseTaskCandidateFinder {
 
     private fun nodeText(node: NodeSnapshot): String =
         (node.text ?: node.contentDescription ?: "").trim()
+
+    private fun compact(text: String): String =
+        text.replace(Regex("\\s+"), "")
 
     private fun centerY(bounds: IntRect): Int =
         bounds.top + (bounds.bottom - bounds.top) / 2

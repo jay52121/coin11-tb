@@ -25,6 +25,7 @@ import com.coin11.taojinbi.recognizer.PageRecognizer
 import com.coin11.taojinbi.recognizer.PageType
 import com.coin11.taojinbi.recognizer.RecognitionSnapshot
 import com.coin11.taojinbi.recognizer.RecognitionState
+import com.coin11.taojinbi.recognizer.RuleSet
 import com.coin11.taojinbi.recognizer.RulesLoader
 import com.coin11.taojinbi.task.BrowseContextPhase
 import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
@@ -38,6 +39,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var pageRecognizer: PageRecognizer
     private lateinit var actionExecutor: AccessibilityActionExecutor
+    private lateinit var rules: RuleSet
     private var lastCaptureAt = 0L
     private val serviceInstanceToken = Integer.toHexString(System.identityHashCode(this))
 
@@ -47,7 +49,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
     private enum class OneBrowseStage {
         IDLE,
+        FINDING_COIN_ENTRY,
+        WAITING_SIGN_ENTRY,
         WAITING_TASK_LIST,
+        WAITING_DAILY_ENTRY,
         FINDING_TASK,
         WAITING_BROWSE_PAGE,
         WAITING_REWARD_RESULT,
@@ -63,9 +68,18 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var oneBrowseNextSwipeAtMillis = 0L
     private var oneBrowseNextOcrAtMillis = 0L
     private var oneBrowseOcrInFlight = false
+    private enum class CoinEntryKind {
+        EARN_MORE,
+        EARN,
+    }
+
     private var oneBrowseEntryOcrInFlight = false
     private var oneBrowseEntryClicked = false
     private var oneBrowseSignClaimed = false
+    private var oneBrowseDailyFallbackClicked = false
+    private var oneBrowseEntryRetryCount = 0
+    private var oneBrowseDailyReadyAtMillis = 0L
+    private var oneBrowseLastEntryKind: CoinEntryKind? = null
     private var oneBrowseTaskListScrolls = 0
     private var oneBrowseBackCount = 0
     private var oneBrowseLastReturnActionAtMillis = 0L
@@ -77,6 +91,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var currentCoinTaskKey = ""
     private var supportedCoinTasksCompleted = 0
     private var skippedCoinTasks = 0
+
+    private val coinEntryWaitRunnable = Runnable {
+        runCoinEntryWaitTick()
+    }
 
     private val oneBrowseTick = object : Runnable {
         override fun run() {
@@ -117,7 +135,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
 
         val loadedRules = RulesLoader.load(this)
-        pageRecognizer = PageRecognizer(loadedRules.rules)
+        rules = loadedRules.rules
+        pageRecognizer = PageRecognizer(rules)
         actionExecutor = AccessibilityActionExecutor(this)
         RecognitionState.configureRules(
             source = loadedRules.source,
@@ -265,9 +284,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         return when (recognition.result.pageType) {
             PageType.COIN_HOME -> {
-                oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
-                oneBrowseStageDeadlineMillis =
-                    System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
+                oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
                 enterTaskListForOneBrowse(observation)
                 "accepted run_one_browse_task from coin_home"
             }
@@ -321,9 +338,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         return when (recognition.result.pageType) {
             PageType.COIN_HOME -> {
-                oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
-                oneBrowseStageDeadlineMillis =
-                    System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
+                oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
                 enterTaskListForOneBrowse(observation)
                 "accepted run_coin_mainline from coin_home"
             }
@@ -345,6 +360,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
     private fun resetOneBrowseState() {
         handler.removeCallbacks(oneBrowseTick)
+        handler.removeCallbacks(coinEntryWaitRunnable)
         oneBrowseStage = OneBrowseStage.IDLE
         oneBrowseStageDeadlineMillis = 0L
         oneBrowseNextSwipeAtMillis = 0L
@@ -353,6 +369,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseEntryOcrInFlight = false
         oneBrowseEntryClicked = false
         oneBrowseSignClaimed = false
+        oneBrowseDailyFallbackClicked = false
+        oneBrowseEntryRetryCount = 0
+        oneBrowseDailyReadyAtMillis = 0L
+        oneBrowseLastEntryKind = null
         oneBrowseTaskListScrolls = 0
         oneBrowseBackCount = 0
         oneBrowseLastReturnActionAtMillis = 0L
@@ -394,15 +414,13 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             OneBrowseStage.FAILED,
             -> Unit
 
-            OneBrowseStage.WAITING_TASK_LIST -> {
+            OneBrowseStage.FINDING_COIN_ENTRY,
+            OneBrowseStage.WAITING_SIGN_ENTRY,
+            OneBrowseStage.WAITING_TASK_LIST,
+            OneBrowseStage.WAITING_DAILY_ENTRY,
+            -> {
                 if (pageType == PageType.DAILY_TASK_LIST) {
-                    oneBrowseStage = OneBrowseStage.FINDING_TASK
-                    oneBrowseLog("进入 daily_task_list Observation #" + observation.id)
-                    findAndClickNextTask(observation)
-                } else if (System.currentTimeMillis() > oneBrowseStageDeadlineMillis) {
-                    failOneBrowse("进入任务列表超时，最后 page=" + pageType.wireName)
-                } else if (pageType == PageType.COIN_HOME) {
-                    enterTaskListForOneBrowse(observation)
+                    onCoinTaskListReady(observation)
                 }
             }
 
@@ -410,6 +428,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 if (pageType == PageType.DAILY_TASK_LIST) {
                     findAndClickNextTask(observation)
                 } else if (pageType == PageType.COIN_HOME) {
+                    oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
                     enterTaskListForOneBrowse(observation)
                 }
             }
@@ -448,9 +467,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                         message = "奖励动作完成",
                     )
                     PageType.COIN_HOME -> {
-                        oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
-                        oneBrowseStageDeadlineMillis =
-                            System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
+                        oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
                         enterTaskListForOneBrowse(observation)
                     }
                     PageType.EXTERNAL_APP,
@@ -524,154 +541,679 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         observation: com.coin11.taojinbi.observation.Observation,
         returning: Boolean = false,
     ): Boolean {
-        if (!returning && oneBrowseEntryClicked) {
-            return true
+        if (returning) {
+            return tryReturnCoinEntry(observation)
         }
 
-        val entry = BrowseTaskCandidateFinder.findCoinTaskEntry(observation)
-        if (entry != null) {
-            val label = (entry.text ?: entry.contentDescription ?: "赚金币").trim()
-            if (!returning) {
-                oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
-                oneBrowseStageDeadlineMillis =
-                    System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
-            }
-            oneBrowseLog(
-                (if (returning) "返回过程中点击任务入口 " else "点击任务入口 ") +
-                    label + " " + entry.bounds,
-            )
-            if (!returning) {
-                oneBrowseEntryClicked = true
-            }
-            return tapBoundsForOneBrowse(entry.bounds, "one_task_entry")
+        if (oneBrowseStage != OneBrowseStage.FINDING_COIN_ENTRY) {
+            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
         }
 
         if (!oneBrowseSignClaimed) {
             val signEntry = BrowseTaskCandidateFinder.findSignCoinEntry(observation)
             if (signEntry != null) {
-                oneBrowseSignClaimed = true
-                oneBrowseStageDeadlineMillis =
-                    System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
-                oneBrowseLog(
-                    "点击签到领金币，随后继续查找赚金币入口 " +
-                        signEntry.bounds,
-                )
-                return tapBoundsForOneBrowse(
-                    signEntry.bounds,
-                    "one_task_sign_coin",
+                return clickSignAndWait(
+                    bounds = signEntry.bounds,
+                    source = "XML",
                 )
             }
+
+            return startInitialSignOcrCheck()
         }
 
-        return startCoinEntryOcrFallback(returning)
+        return startOriginalCoinEntryFallback(observation)
     }
 
-    private fun startCoinEntryOcrFallback(returning: Boolean): Boolean {
+    private fun startInitialSignOcrCheck(): Boolean {
         if (oneBrowseEntryOcrInFlight) {
             return true
         }
 
         oneBrowseEntryOcrInFlight = true
-        oneBrowseLog("XML未找到赚金币入口，OCR兜底查找")
+        oneBrowseLog("XML未发现签到领金币，OCR检查签到入口")
+
+        captureOcrSnapshot { result ->
+            oneBrowseEntryOcrInFlight = false
+            if (oneBrowseStage != OneBrowseStage.FINDING_COIN_ENTRY) {
+                return@captureOcrSnapshot
+            }
+
+            result.onSuccess { snapshot ->
+                OcrState.publish(snapshot)
+                val signLine = snapshot.lines.firstOrNull { line ->
+                    line.bounds != null &&
+                        compactEntryText(line.text).contains("签到领金币")
+                }
+
+                if (signLine?.bounds != null) {
+                    clickSignAndWait(
+                        bounds = signLine.bounds,
+                        source = "OCR",
+                    )
+                } else {
+                    val observation = latestValidTaobaoObservation()
+                    if (observation != null) {
+                        startOriginalCoinEntryFallback(observation)
+                    } else {
+                        oneBrowseLog("签到OCR未命中，等待最新淘宝 Observation 后继续原入口")
+                        scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+                    }
+                }
+            }.onFailure { error ->
+                oneBrowseLog(
+                    "签到OCR失败 " + error.javaClass.simpleName +
+                        "，继续原入口逻辑",
+                )
+                val observation = latestValidTaobaoObservation()
+                if (observation != null) {
+                    startOriginalCoinEntryFallback(observation)
+                } else {
+                    scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun clickSignAndWait(
+        bounds: com.coin11.taojinbi.observation.IntRect,
+        source: String,
+    ): Boolean {
+        oneBrowseSignClaimed = true
+        oneBrowseStage = OneBrowseStage.WAITING_SIGN_ENTRY
+        oneBrowseStageDeadlineMillis =
+            System.currentTimeMillis() + SIGN_ENTRY_WAIT_MS
+        oneBrowseEntryRetryCount = 0
+
+        oneBrowseLog(
+            source + "点击签到领金币 " + bounds +
+                "；进入等待签到后入口状态，最多8秒",
+        )
+
+        val queued = tapBoundsForOneBrowse(
+            bounds,
+            "one_task_sign_coin_" + source.lowercase(),
+        )
+
+        if (queued) {
+            scheduleEntryRetry(SIGN_ENTRY_RETRY_MS)
+        } else {
+            oneBrowseLog("签到点击未排队，继续原入口逻辑")
+            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+            val observation = latestValidTaobaoObservation()
+            if (observation != null) {
+                startOriginalCoinEntryFallback(observation)
+            }
+        }
+        return queued
+    }
+
+    private fun runCoinEntryWaitTick() {
+        when (oneBrowseStage) {
+            OneBrowseStage.FINDING_COIN_ENTRY -> {
+                val observation = latestValidTaobaoObservation()
+                if (observation != null) {
+                    startOriginalCoinEntryFallback(observation)
+                } else {
+                    scheduleCapture()
+                    scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+                }
+            }
+
+            OneBrowseStage.WAITING_SIGN_ENTRY -> runSignEntryRetryTick()
+            OneBrowseStage.WAITING_TASK_LIST -> runTaskListWaitTick()
+            OneBrowseStage.WAITING_DAILY_ENTRY -> runDailyEntryRetryTick()
+            else -> Unit
+        }
+    }
+
+    private fun runSignEntryRetryTick() {
+        val now = System.currentTimeMillis()
+        if (now >= oneBrowseStageDeadlineMillis) {
+            oneBrowseLog(
+                "签到后入口等待超时；进入 Mac 原入口兜底顺序",
+            )
+            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+            oneBrowseEntryRetryCount = 0
+            val observation = latestValidTaobaoObservation()
+            if (observation != null) {
+                startOriginalCoinEntryFallback(observation)
+            } else {
+                scheduleCapture()
+                scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+            }
+            return
+        }
+
+        oneBrowseEntryRetryCount += 1
+        oneBrowseLog(
+            "签到后入口等待重试 #" + oneBrowseEntryRetryCount,
+        )
+        scheduleCapture()
+
+        val observation = latestValidTaobaoObservation()
+        if (observation == null) {
+            scheduleEntryRetry(SIGN_ENTRY_RETRY_MS)
+            return
+        }
+
+        if (tryClickCoinEntryFromNodes(observation, "签到后")) {
+            return
+        }
+
+        startCoinEntryOcrAttempt(
+            expectedStage = OneBrowseStage.WAITING_SIGN_ENTRY,
+            contextLabel = "签到后",
+            onMiss = {
+                if (oneBrowseStage == OneBrowseStage.WAITING_SIGN_ENTRY) {
+                    scheduleEntryRetry(SIGN_ENTRY_RETRY_MS)
+                }
+            },
+        )
+    }
+
+    private fun runTaskListWaitTick() {
+        scheduleCapture()
+        if (oneBrowseStage != OneBrowseStage.WAITING_TASK_LIST) {
+            return
+        }
+
+        if (System.currentTimeMillis() < oneBrowseStageDeadlineMillis) {
+            scheduleEntryRetry(TASK_LIST_CHECK_INTERVAL_MS)
+            return
+        }
+
+        oneBrowseLog(
+            "入口点击后3秒仍未进入 daily_task_list；继续 Mac 原入口兜底",
+        )
+        oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+
+        val observation = latestValidTaobaoObservation()
+        when (oneBrowseLastEntryKind) {
+            CoinEntryKind.EARN_MORE -> {
+                if (observation != null) {
+                    startOriginalCoinEntryFallback(
+                        observation = observation,
+                        skipEarnMoreXml = true,
+                        allowEntryOcr = true,
+                    )
+                } else {
+                    scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+                }
+            }
+
+            CoinEntryKind.EARN -> {
+                if (observation != null) {
+                    startDailyVersionOrFinalTaskListCheck(observation)
+                } else {
+                    scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+                }
+            }
+
+            null -> {
+                if (observation != null) {
+                    startOriginalCoinEntryFallback(observation)
+                } else {
+                    scheduleEntryRetry(ENTRY_OBSERVATION_RETRY_MS)
+                }
+            }
+        }
+    }
+
+    private fun runDailyEntryRetryTick() {
+        val now = System.currentTimeMillis()
+        if (now < oneBrowseDailyReadyAtMillis) {
+            scheduleEntryRetry(oneBrowseDailyReadyAtMillis - now)
+            return
+        }
+
+        if (now >= oneBrowseStageDeadlineMillis) {
+            oneBrowseLog(
+                "回日常版后8秒仍未找到可点击赚金币入口；执行最终OCR任务列表确认",
+            )
+            startFinalTaskListOcrCheck()
+            return
+        }
+
+        oneBrowseEntryRetryCount += 1
+        oneBrowseLog(
+            "回日常版后入口等待重试 #" + oneBrowseEntryRetryCount,
+        )
+        scheduleCapture()
+
+        val observation = latestValidTaobaoObservation()
+        if (observation == null) {
+            scheduleEntryRetry(DAILY_ENTRY_RETRY_MS)
+            return
+        }
+
+        if (tryClickCoinEntryFromNodes(observation, "回日常版后")) {
+            return
+        }
+
+        startCoinEntryOcrAttempt(
+            expectedStage = OneBrowseStage.WAITING_DAILY_ENTRY,
+            contextLabel = "回日常版后",
+            onMiss = {
+                if (oneBrowseStage == OneBrowseStage.WAITING_DAILY_ENTRY) {
+                    scheduleEntryRetry(DAILY_ENTRY_RETRY_MS)
+                }
+            },
+        )
+    }
+
+    private fun startOriginalCoinEntryFallback(
+        observation: com.coin11.taojinbi.observation.Observation,
+        skipEarnMoreXml: Boolean = false,
+        allowEntryOcr: Boolean = true,
+    ): Boolean {
+        if (oneBrowseStage != OneBrowseStage.FINDING_COIN_ENTRY) {
+            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+        }
+
+        if (!skipEarnMoreXml) {
+            val earnMore = BrowseTaskCandidateFinder.findEarnMoreEntry(
+                observation,
+                rules.earnMoreWords,
+            )
+            if (earnMore != null) {
+                return clickCoinEntry(
+                    bounds = earnMore.bounds,
+                    label = earnMore.text ?: earnMore.contentDescription ?: "赚更多金币",
+                    kind = CoinEntryKind.EARN_MORE,
+                    contextLabel = "原入口",
+                )
+            }
+        }
+
+        val earn = BrowseTaskCandidateFinder.findEarnEntry(
+            observation,
+            rules.earnWords,
+        )
+        if (earn != null) {
+            return clickCoinEntry(
+                bounds = earn.bounds,
+                label = earn.text ?: earn.contentDescription ?: "赚金币",
+                kind = CoinEntryKind.EARN,
+                contextLabel = "原入口",
+            )
+        }
+
+        if (!allowEntryOcr) {
+            return startDailyVersionOrFinalTaskListCheck(observation)
+        }
+
+        return startCoinEntryOcrAttempt(
+            expectedStage = OneBrowseStage.FINDING_COIN_ENTRY,
+            contextLabel = "原入口",
+            onMiss = {
+                val latest = latestValidTaobaoObservation() ?: observation
+                startDailyVersionOrFinalTaskListCheck(latest)
+            },
+        )
+    }
+
+    private fun tryClickCoinEntryFromNodes(
+        observation: com.coin11.taojinbi.observation.Observation,
+        contextLabel: String,
+    ): Boolean {
+        val earnMore = BrowseTaskCandidateFinder.findEarnMoreEntry(
+            observation,
+            rules.earnMoreWords,
+        )
+        if (earnMore != null) {
+            return clickCoinEntry(
+                bounds = earnMore.bounds,
+                label = earnMore.text ?: earnMore.contentDescription ?: "赚更多金币",
+                kind = CoinEntryKind.EARN_MORE,
+                contextLabel = contextLabel,
+            )
+        }
+
+        val earn = BrowseTaskCandidateFinder.findEarnEntry(
+            observation,
+            rules.earnWords,
+        )
+        if (earn != null) {
+            return clickCoinEntry(
+                bounds = earn.bounds,
+                label = earn.text ?: earn.contentDescription ?: "赚金币",
+                kind = CoinEntryKind.EARN,
+                contextLabel = contextLabel,
+            )
+        }
+
+        return false
+    }
+
+    private fun startCoinEntryOcrAttempt(
+        expectedStage: OneBrowseStage,
+        contextLabel: String,
+        onMiss: () -> Unit,
+    ): Boolean {
+        if (oneBrowseEntryOcrInFlight) {
+            return true
+        }
+
+        oneBrowseEntryOcrInFlight = true
+        oneBrowseLog(contextLabel + " XML未命中赚金币入口，OCR重查")
+
+        captureOcrSnapshot { result ->
+            oneBrowseEntryOcrInFlight = false
+            if (oneBrowseStage != expectedStage) {
+                return@captureOcrSnapshot
+            }
+
+            result.onSuccess { snapshot ->
+                OcrState.publish(snapshot)
+                val entry = findOcrCoinEntry(snapshot)
+                if (entry != null && entry.second.bounds != null) {
+                    clickCoinEntry(
+                        bounds = entry.second.bounds!!,
+                        label = entry.second.text,
+                        kind = entry.first,
+                        contextLabel = contextLabel + " OCR",
+                    )
+                } else {
+                    oneBrowseLog(
+                        contextLabel + " OCR未命中赚更多金币/赚金币",
+                    )
+                    onMiss()
+                }
+            }.onFailure { error ->
+                oneBrowseLog(
+                    contextLabel + " OCR失败 " + error.javaClass.simpleName,
+                )
+                onMiss()
+            }
+        }
+        return true
+    }
+
+    private fun findOcrCoinEntry(
+        snapshot: OcrSnapshot,
+    ): Pair<CoinEntryKind, com.coin11.taojinbi.ocr.OcrLine>? {
+        return snapshot.lines
+            .asSequence()
+            .filter { it.bounds != null }
+            .mapNotNull { line ->
+                val compact = compactEntryText(line.text)
+                val earnMoreRank = rules.earnMoreWords.indexOfFirst { word ->
+                    compact.contains(compactEntryText(word))
+                }
+                if (earnMoreRank >= 0) {
+                    return@mapNotNull Triple(
+                        earnMoreRank,
+                        0,
+                        CoinEntryKind.EARN_MORE to line,
+                    )
+                }
+
+                val earnRank = rules.earnWords.indexOfFirst { word ->
+                    compact == compactEntryText(word)
+                }
+                if (earnRank >= 0) {
+                    Triple(
+                        earnRank,
+                        1,
+                        CoinEntryKind.EARN to line,
+                    )
+                } else {
+                    null
+                }
+            }
+            .sortedWith(
+                compareBy<Triple<Int, Int, Pair<CoinEntryKind, com.coin11.taojinbi.ocr.OcrLine>>> {
+                    it.second
+                }.thenBy {
+                    it.first
+                }.thenBy {
+                    it.third.second.bounds?.top ?: Int.MAX_VALUE
+                },
+            )
+            .map { it.third }
+            .firstOrNull()
+    }
+
+    private fun clickCoinEntry(
+        bounds: com.coin11.taojinbi.observation.IntRect,
+        label: String,
+        kind: CoinEntryKind,
+        contextLabel: String,
+    ): Boolean {
+        oneBrowseEntryClicked = true
+        oneBrowseLastEntryKind = kind
+        oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
+        oneBrowseStageDeadlineMillis =
+            System.currentTimeMillis() + ENTRY_CLICK_TASK_LIST_WAIT_MS
+
+        oneBrowseLog(
+            contextLabel + "入口命中：" + label + " " + bounds +
+                "；等待 daily_task_list",
+        )
+
+        val queued = tapBoundsForOneBrowse(
+            bounds,
+            "one_task_entry_" + kind.name.lowercase(),
+        )
+        if (queued) {
+            scheduleEntryRetry(TASK_LIST_CHECK_INTERVAL_MS)
+        } else {
+            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+            oneBrowseLog("入口点击未排队，继续原入口兜底")
+            val observation = latestValidTaobaoObservation()
+            if (observation != null) {
+                startDailyVersionOrFinalTaskListCheck(observation)
+            }
+        }
+        return queued
+    }
+
+    private fun startDailyVersionOrFinalTaskListCheck(
+        observation: com.coin11.taojinbi.observation.Observation,
+    ): Boolean {
+        if (!oneBrowseDailyFallbackClicked) {
+            val daily = BrowseTaskCandidateFinder.findDailyVersionEntry(
+                observation,
+                rules.dailyVersionWords,
+            )
+            if (daily != null) {
+                oneBrowseDailyFallbackClicked = true
+                oneBrowseStage = OneBrowseStage.WAITING_DAILY_ENTRY
+                oneBrowseDailyReadyAtMillis =
+                    System.currentTimeMillis() + DAILY_VERSION_ANIMATION_MS
+                oneBrowseStageDeadlineMillis =
+                    oneBrowseDailyReadyAtMillis + DAILY_ENTRY_WAIT_MS
+                oneBrowseEntryRetryCount = 0
+
+                oneBrowseLog(
+                    "原入口未命中；点击回日常版 " + daily.bounds +
+                        "，先等3秒动画，再最多等待8秒赚金币入口",
+                )
+
+                val queued = tapBoundsForOneBrowse(
+                    daily.bounds,
+                    "one_task_daily_version",
+                )
+                if (queued) {
+                    scheduleEntryRetry(DAILY_VERSION_ANIMATION_MS)
+                    return true
+                }
+
+                oneBrowseLog("回日常版点击未排队，直接执行最终OCR任务列表确认")
+            }
+        }
+
+        return startFinalTaskListOcrCheck()
+    }
+
+    private fun startFinalTaskListOcrCheck(): Boolean {
+        if (oneBrowseEntryOcrInFlight) {
+            return true
+        }
+
+        oneBrowseEntryOcrInFlight = true
+        oneBrowseLog("入口阶段执行最终OCR任务列表确认")
 
         captureOcrSnapshot { result ->
             oneBrowseEntryOcrInFlight = false
             if (
-                oneBrowseStage != OneBrowseStage.WAITING_TASK_LIST &&
-                oneBrowseStage != OneBrowseStage.RETURNING
+                oneBrowseStage != OneBrowseStage.FINDING_COIN_ENTRY &&
+                oneBrowseStage != OneBrowseStage.WAITING_DAILY_ENTRY
             ) {
                 return@captureOcrSnapshot
             }
 
             result.onSuccess { snapshot ->
                 OcrState.publish(snapshot)
-
-                if (!oneBrowseSignClaimed) {
-                    val signLine = snapshot.lines.firstOrNull { line ->
-                        line.bounds != null &&
-                            line.text.replace(" ", "").contains("签到领金币")
-                    }
-                    if (signLine?.bounds != null) {
-                        oneBrowseSignClaimed = true
-                        oneBrowseStageDeadlineMillis =
-                            System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
+                if (ocrLooksLikeTaskList(snapshot)) {
+                    val observation = latestValidTaobaoObservation()
+                    if (observation != null) {
                         oneBrowseLog(
-                            "OCR点击签到领金币 " + signLine.bounds,
+                            "最终OCR确认已在任务列表；继续主线",
                         )
-                        tapBoundsForOneBrowse(
-                            signLine.bounds,
-                            "one_task_sign_coin_ocr",
-                        )
-                        return@onSuccess
+                        onCoinTaskListReady(observation)
+                    } else {
+                        failOneBrowse("OCR确认任务列表，但没有有效淘宝 Observation")
                     }
-                }
-
-                val entryLine = snapshot.lines
-                    .filter { it.bounds != null }
-                    .mapNotNull { line ->
-                        val compact = line.text.replace(" ", "")
-                        val rank = when {
-                            compact.contains("赚更多金币") -> 0
-                            compact == "赚金币" -> 1
-                            else -> -1
-                        }
-                        if (rank < 0) null else rank to line
-                    }
-                    .sortedWith(
-                        compareBy<Pair<Int, com.coin11.taojinbi.ocr.OcrLine>> { it.first }
-                            .thenBy { it.second.bounds?.top ?: Int.MAX_VALUE },
-                    )
-                    .firstOrNull()
-                    ?.second
-
-                if (entryLine?.bounds != null) {
-                    if (!returning) {
-                        oneBrowseStage = OneBrowseStage.WAITING_TASK_LIST
-                        oneBrowseStageDeadlineMillis =
-                            System.currentTimeMillis() + ENTER_TASK_LIST_TIMEOUT_MS
-                    }
-                    oneBrowseLog(
-                        "OCR点击任务入口 " + entryLine.text +
-                            " " + entryLine.bounds,
-                    )
-                    if (!returning) {
-                        oneBrowseEntryClicked = true
-                    }
-                    tapBoundsForOneBrowse(
-                        entryLine.bounds,
-                        "one_task_entry_ocr",
-                    )
-                    return@onSuccess
-                }
-
-                val sample = snapshot.lines
-                    .take(12)
-                    .joinToString(" | ") { it.text }
-                if (returning) {
-                    oneBrowseLog(
-                        "返回过程中 XML/OCR 均未找到赚金币入口；OCR=" + sample,
-                    )
                 } else {
+                    val sample = snapshot.lines
+                        .take(12)
+                        .joinToString(" | ") { it.text }
                     failOneBrowse(
-                        "coin_home XML/OCR均未找到赚更多金币/赚金币；OCR=" + sample,
+                        "未找到赚金币入口；签到等待/原入口/回日常版/OCR任务列表均未命中；OCR=" +
+                            sample,
                     )
                 }
             }.onFailure { error ->
-                if (returning) {
-                    oneBrowseLog(
-                        "返回过程中入口OCR失败 " +
-                            error.javaClass.simpleName,
-                    )
-                } else {
-                    failOneBrowse(
-                        "coin_home 入口OCR失败 " +
-                            error.javaClass.simpleName,
-                    )
-                }
+                failOneBrowse(
+                    "入口最终OCR失败 " + error.javaClass.simpleName,
+                )
             }
         }
         return true
     }
+
+    private fun ocrLooksLikeTaskList(snapshot: OcrSnapshot): Boolean {
+        val texts = snapshot.lines
+            .map { compactEntryText(it.text) }
+            .filter { it.isNotBlank() }
+
+        val hasFast = texts.any { text ->
+            rules.dailyFastWords.any { text.contains(compactEntryText(it)) }
+        }
+        val hasTaskArea = texts.any { text ->
+            rules.dailyTaskAreaWords.any { text.contains(compactEntryText(it)) }
+        }
+        val hasBottom = texts.any { text ->
+            rules.taskListBottomWords.any { text.contains(compactEntryText(it)) }
+        }
+        val hasProgress = texts.any { ENTRY_PROGRESS_REGEX.containsMatchIn(it) }
+        val actionRegex = runCatching { Regex(rules.actionTextPattern) }
+            .getOrElse { Regex("去完成|去逛逛|去浏览|领取奖励|立即领取") }
+        val actionCount = texts.count { actionRegex.containsMatchIn(it) }
+
+        return (
+            hasFast && (hasTaskArea || actionCount > 0 || hasProgress)
+        ) || (
+            hasTaskArea && (actionCount > 0 || hasProgress)
+        ) || (
+            hasBottom && (hasTaskArea || actionCount > 0 || hasProgress)
+        )
+    }
+
+    private fun onCoinTaskListReady(
+        observation: com.coin11.taojinbi.observation.Observation,
+    ) {
+        handler.removeCallbacks(coinEntryWaitRunnable)
+        oneBrowseStage = OneBrowseStage.FINDING_TASK
+        oneBrowseLog(
+            "进入 daily_task_list Observation #" + observation.id,
+        )
+        findAndClickNextTask(observation)
+    }
+
+    private fun latestValidTaobaoObservation():
+        com.coin11.taojinbi.observation.Observation? {
+        val observation = ObserverState.latestExternalObservation ?: return null
+        if (!ObserverState.latestObservationValid) {
+            return null
+        }
+        if (observation.packageName != TAOBAO_PACKAGE) {
+            return null
+        }
+        return observation
+    }
+
+    private fun scheduleEntryRetry(delayMs: Long) {
+        handler.removeCallbacks(coinEntryWaitRunnable)
+        handler.postDelayed(
+            coinEntryWaitRunnable,
+            delayMs.coerceAtLeast(1L),
+        )
+    }
+
+    private fun tryReturnCoinEntry(
+        observation: com.coin11.taojinbi.observation.Observation,
+    ): Boolean {
+        val entry = BrowseTaskCandidateFinder.findCoinTaskEntry(
+            observation,
+            rules.earnMoreWords,
+            rules.earnWords,
+        )
+        if (entry != null) {
+            val label =
+                (entry.text ?: entry.contentDescription ?: "赚金币").trim()
+            oneBrowseLog(
+                "返回过程中点击任务入口 " + label + " " + entry.bounds,
+            )
+            return tapBoundsForOneBrowse(
+                entry.bounds,
+                "one_task_return_entry",
+            )
+        }
+
+        if (oneBrowseEntryOcrInFlight) {
+            return true
+        }
+
+        oneBrowseEntryOcrInFlight = true
+        oneBrowseLog("返回过程中 XML未找到赚金币入口，OCR兜底查找")
+        captureOcrSnapshot { result ->
+            oneBrowseEntryOcrInFlight = false
+            if (oneBrowseStage != OneBrowseStage.RETURNING) {
+                return@captureOcrSnapshot
+            }
+            result.onSuccess { snapshot ->
+                OcrState.publish(snapshot)
+                val entryLine = findOcrCoinEntry(snapshot)
+                if (entryLine != null && entryLine.second.bounds != null) {
+                    oneBrowseLog(
+                        "返回过程中 OCR点击任务入口 " +
+                            entryLine.second.text + " " +
+                            entryLine.second.bounds,
+                    )
+                    tapBoundsForOneBrowse(
+                        entryLine.second.bounds!!,
+                        "one_task_return_entry_ocr",
+                    )
+                } else {
+                    oneBrowseLog(
+                        "返回过程中 XML/OCR 均未找到赚金币入口",
+                    )
+                }
+            }.onFailure { error ->
+                oneBrowseLog(
+                    "返回过程中入口OCR失败 " +
+                        error.javaClass.simpleName,
+                )
+            }
+        }
+        return true
+    }
+
+    private fun compactEntryText(text: String): String =
+        text.replace(Regex("\\s+"), "").trim()
 
     private fun findAndClickNextTask(
         observation: com.coin11.taojinbi.observation.Observation,
@@ -1249,7 +1791,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val MIN_CAPTURE_INTERVAL_MS = 350L
         private const val EVENT_SETTLE_MS = 120L
 
-        private const val ENTER_TASK_LIST_TIMEOUT_MS = 8_000L
+        private const val SIGN_ENTRY_WAIT_MS = 8_000L
+        private const val SIGN_ENTRY_RETRY_MS = 800L
+        private const val ENTRY_CLICK_TASK_LIST_WAIT_MS = 3_000L
+        private const val TASK_LIST_CHECK_INTERVAL_MS = 600L
+        private const val DAILY_VERSION_ANIMATION_MS = 3_000L
+        private const val DAILY_ENTRY_WAIT_MS = 8_000L
+        private const val DAILY_ENTRY_RETRY_MS = 1_000L
+        private const val ENTRY_OBSERVATION_RETRY_MS = 500L
         private const val ENTER_BROWSE_TIMEOUT_MS = 6_000L
         private const val REWARD_RESULT_TIMEOUT_MS = 5_000L
         private const val BROWSE_DURATION_MS = 30_000L
@@ -1266,6 +1815,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val DEBUG_MAINLINE_QUEUE_TTL_MS = 30_000L
         private const val DEBUG_REQUEST_PREFS = "debug_run_requests"
         private const val DEBUG_COIN_MAINLINE_UNTIL = "coin_mainline_until"
+        private val ENTRY_PROGRESS_REGEX = Regex("[（(]\\d+/\\d+[）)]")
 
         @Volatile
         private var instance: TaojinbiAccessibilityService? = null

@@ -4,6 +4,9 @@ import org.json.JSONObject
 
 data class RuleSet(
     val actionTextPattern: String,
+    val earnMoreWords: List<String>,
+    val earnWords: List<String>,
+    val dailyVersionWords: List<String>,
     val doneWords: List<String>,
     val searchBrowseWords: List<String>,
     val coinHomeWords: List<String>,
@@ -21,6 +24,9 @@ data class RuleSet(
     companion object {
         val DEFAULT = RuleSet(
             actionTextPattern = "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐",
+            earnMoreWords = listOf("赚更多金币"),
+            earnWords = listOf("赚金币"),
+            dailyVersionWords = listOf("回日常版"),
             doneWords = listOf("已完成", "已领取", "已得", "任务已完成", "记得明天再来"),
             searchBrowseWords = listOf("搜索后浏览立得奖励", "搜索有福利", "淘宝精选", "搜索发现", "历史搜索"),
             coinHomeWords = listOf("淘金币首页", "淘金币标题", "可抵", "购物车", "赚金币抵钱", "赚更多金币"),
@@ -52,6 +58,9 @@ data class RuleSet(
                     "action_text_pattern",
                     DEFAULT.actionTextPattern,
                 ).ifBlank { DEFAULT.actionTextPattern },
+                earnMoreWords = strings("earn_more_words", DEFAULT.earnMoreWords),
+                earnWords = strings("earn_words", DEFAULT.earnWords),
+                dailyVersionWords = strings("daily_version_words", DEFAULT.dailyVersionWords),
                 doneWords = strings("done_words", DEFAULT.doneWords),
                 searchBrowseWords = strings("search_browse_words", DEFAULT.searchBrowseWords),
                 coinHomeWords = strings("coin_home_words", DEFAULT.coinHomeWords),

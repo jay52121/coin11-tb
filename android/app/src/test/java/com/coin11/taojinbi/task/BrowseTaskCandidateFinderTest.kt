@@ -90,6 +90,18 @@ class BrowseTaskCandidateFinderTest {
         )
     }
 
+    @Test
+    fun findsDailyVersionEntrySeparately() {
+        val observation = observation(
+            node(0, "回日常版", 700, 300, 1200, 420),
+        )
+
+        assertEquals(
+            "回日常版",
+            BrowseTaskCandidateFinder.findDailyVersionEntry(observation)?.text,
+        )
+    }
+
     private fun observation(vararg nodes: NodeSnapshot) = Observation(
         id = 1L,
         capturedAtMillis = 1L,
