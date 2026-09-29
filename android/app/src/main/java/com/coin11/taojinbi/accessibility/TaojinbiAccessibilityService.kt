@@ -668,6 +668,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             OneBrowseStage.IDLE,
             OneBrowseStage.DONE,
             OneBrowseStage.FAILED,
+            OneBrowseStage.STOPPED,
             -> Unit
 
             OneBrowseStage.FINDING_COIN_ENTRY,

@@ -10,8 +10,8 @@ android {
         applicationId = "com.coin11.taojinbi"
         minSdk = 30
         targetSdk = 36
-        versionCode = 30
-        versionName = "0.5.21"
+        versionCode = 31
+        versionName = "0.5.22"
     }
 
     buildTypes {
