@@ -44,6 +44,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private lateinit var pageRecognizer: PageRecognizer
     private lateinit var actionExecutor: AccessibilityActionExecutor
     private lateinit var rules: RuleSet
+    private val runGenerationGate = RunGenerationGate()
+    private var manualStopOverlay: ManualStopOverlayController? = null
     private var lastCaptureAt = 0L
     private val serviceInstanceToken = Integer.toHexString(System.identityHashCode(this))
 
@@ -301,6 +303,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         rules = loadedRules.rules
         pageRecognizer = PageRecognizer(rules)
         actionExecutor = AccessibilityActionExecutor(this)
+        manualStopOverlay = ManualStopOverlayController(
+            service = this,
+            onStopRequested = {
+                stopCoinMainlineManual(source = "overlay")
+            },
+        )
         RecognitionState.configureRules(
             source = loadedRules.source,
             error = loadedRules.error,
@@ -343,6 +351,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        runGenerationGate.invalidate()
+        manualStopOverlay?.hide()
+        manualStopOverlay = null
         handler.removeCallbacksAndMessages(null)
         if (instance === this) {
             instance = null
@@ -354,6 +365,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         Log.w(TAG, "onDestroy " + detail)
         CapabilityState.publish("Accessibility", "服务已销毁。" + detail)
         super.onDestroy()
+    }
+
+    private fun showManualStopOverlay() {
+        manualStopOverlay?.show()
     }
 
     private fun scheduleCapture() {
@@ -438,12 +453,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             ?.takeIf { it.observationId == observation.id }
             ?: return "rejected no matching recognition"
 
+        val runGeneration = runGenerationGate.begin()
         resetOneBrowseState()
         resetOneBrowseTrace("run_one_browse_task")
         coinMainlineMode = false
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseLog(
-            "start Observation #" + observation.id +
+            "start generation=" + runGeneration +
+                " Observation #" + observation.id +
                 " page=" + recognition.result.pageType.wireName,
         )
 
@@ -498,13 +515,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             ?.takeIf { it.observationId == observation.id }
             ?: return "rejected no matching recognition"
 
+        val runGeneration = runGenerationGate.begin()
         resetOneBrowseState()
         resetOneBrowseTrace("run_coin_mainline")
         coinMainlineMode = true
         coinMainlineTargetUserId = targetUserId
         oneBrowseStartedAtMillis = System.currentTimeMillis()
         oneBrowseLog(
-            "v0.5 mainline start Observation #" + observation.id +
+            "v0.5 mainline start generation=" + runGeneration +
+                " Observation #" + observation.id +
                 " page=" + recognition.result.pageType.wireName +
                 " user=" + targetUserId,
         )
@@ -512,12 +531,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         return when (recognition.result.pageType) {
             PageType.COIN_HOME -> {
                 oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                showManualStopOverlay()
                 enterTaskListForOneBrowse(observation)
                 "accepted run_coin_mainline from coin_home"
             }
 
             PageType.DAILY_TASK_LIST -> {
                 oneBrowseStage = OneBrowseStage.FINDING_TASK
+                showManualStopOverlay()
                 findAndClickNextTask(observation)
                 "accepted run_coin_mainline from daily_task_list"
             }
@@ -531,8 +552,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun stopCoinMainlineManual(): String {
+    private fun stopCoinMainlineManual(source: String = "debug"): String {
         val previousStage = oneBrowseStage
+        val invalidatedGeneration = runGenerationGate.invalidate()
 
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(coinEntryWaitRunnable)
@@ -551,7 +573,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         coinMainlineMode = false
 
         val message =
-            "manual stop from=" + previousStage +
+            "manual stop source=" + source +
+                " from=" + previousStage +
+                " generation=" + invalidatedGeneration +
                 " completed=" + supportedCoinTasksCompleted +
                 " skipped=" + skippedCoinTasks +
                 " swipes=" + oneBrowseSwipeCount +
@@ -559,11 +583,13 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         oneBrowseLastMessage = message
         oneBrowseLog("STOPPED " + message)
+        manualStopOverlay?.showStoppedBriefly()
 
         return "accepted stop_coin_mainline: " + message
     }
 
     private fun resetOneBrowseState() {
+        manualStopOverlay?.hide()
         handler.removeCallbacks(oneBrowseTick)
         handler.removeCallbacks(coinEntryWaitRunnable)
         handler.removeCallbacks(returnWatchdog)
@@ -1493,6 +1519,27 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         return observation
     }
 
+    private fun postRunDelayed(
+        delayMs: Long,
+        action: () -> Unit,
+    ) {
+        val generation = runGenerationGate.current()
+        handler.postDelayed(
+            {
+                if (!runGenerationGate.isCurrent(generation)) {
+                    Log.i(
+                        ONE_TASK_TAG,
+                        "drop stale delayed callback generation=" + generation +
+                            " current=" + runGenerationGate.current(),
+                    )
+                    return@postDelayed
+                }
+                action()
+            },
+            delayMs.coerceAtLeast(1L),
+        )
+    }
+
     private fun scheduleEntryRetry(delayMs: Long) {
         handler.removeCallbacks(coinEntryWaitRunnable)
         handler.postDelayed(
@@ -1843,10 +1890,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                             "coin_mainline_expand_more",
                         )
                     ) {
-                        handler.postDelayed(
-                            { scheduleCapture() },
-                            TASK_LIST_SETTLE_MS,
-                        )
+                        postRunDelayed(TASK_LIST_SETTLE_MS) {
+                            scheduleCapture()
+                        }
                         return
                     }
                 }
@@ -1872,10 +1918,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     MAX_MAINLINE_TASK_LIST_SCROLLS,
             )
             swipeTaskListForOneBrowse()
-            handler.postDelayed(
-                { scheduleCapture() },
-                TASK_LIST_SETTLE_MS,
-            )
+            postRunDelayed(TASK_LIST_SETTLE_MS) {
+                scheduleCapture()
+            }
             return
         }
 
@@ -1980,10 +2025,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun resumeTaskFindingFresh(afterObservationId: Long) {
         oneBrowseStage = OneBrowseStage.FINDING_TASK
         taskDecisionAfterObservationId = afterObservationId
-        handler.postDelayed(
-            { scheduleCapture() },
-            TASK_LIST_SETTLE_MS,
-        )
+        postRunDelayed(TASK_LIST_SETTLE_MS) {
+            scheduleCapture()
+        }
     }
 
     private fun taskTransitionSettled(
@@ -2081,10 +2125,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             oneBrowseNextSwipeAtMillis =
                 now + BrowsePacing.nextFirstSwipeDelayMs()
             oneBrowseNextOcrAtMillis = now + BROWSE_FIRST_OCR_DELAY_MS
-            handler.postDelayed(
-                { scheduleCapture() },
-                SEARCH_DISCOVERY_SETTLE_MS,
-            )
+            postRunDelayed(SEARCH_DISCOVERY_SETTLE_MS) {
+                scheduleCapture()
+            }
         }
     }
 
@@ -2092,6 +2135,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
         val x = maxOf(30, (width * 0.06f).toInt())
+        val generation = runGenerationGate.current()
         val queued = actionExecutor.swipe(
             startX = x,
             startY = (height * 0.84f).toInt(),
@@ -2099,7 +2143,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             endY = (height * 0.32f).toInt(),
             durationMs = 450L,
         ) { result ->
-            publishActionResult("v0.4 TaskList Swipe", result)
+            if (runGenerationGate.isCurrent(generation)) {
+                publishActionResult("v0.5 TaskList Swipe", result)
+            }
         }
         if (queued) {
             invalidateObservationForAction("one_task_list_swipe")
@@ -2119,6 +2165,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             screenWidth = resources.displayMetrics.widthPixels,
             screenHeight = resources.displayMetrics.heightPixels,
         )
+        val generation = runGenerationGate.current()
         val queued = actionExecutor.swipe(
             startX = plan.startX,
             startY = plan.startY,
@@ -2126,7 +2173,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             endY = plan.endY,
             durationMs = plan.durationMs,
         ) { result ->
-            publishActionResult("v0.5 Browse Swipe", result)
+            if (runGenerationGate.isCurrent(generation)) {
+                publishActionResult("v0.5 Browse Swipe", result)
+            }
         }
         if (queued) {
             oneBrowseSwipeCount += 1
@@ -2244,10 +2293,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             now + BrowsePacing.nextFirstSwipeDelayMs()
         oneBrowseNextOcrAtMillis = now + BROWSE_FIRST_OCR_DELAY_MS
         oneBrowseSearchDiscoveryAttempted = false
-        handler.postDelayed(
-            { scheduleCapture() },
-            SEARCH_DISCOVERY_SETTLE_MS,
-        )
+        postRunDelayed(SEARCH_DISCOVERY_SETTLE_MS) {
+            scheduleCapture()
+        }
     }
 
     private fun ocrShowsBrowseDone(snapshot: OcrSnapshot): Boolean {
@@ -2421,6 +2469,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun swipeExternalTaskOnce() {
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
+        val generation = runGenerationGate.current()
         val queued = actionExecutor.swipe(
             startX = width / 2,
             startY = (height * 0.78f).toInt(),
@@ -2428,14 +2477,15 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             endY = (height * 0.38f).toInt(),
             durationMs = 350L,
         ) { result ->
-            publishActionResult("v0.5 External Swipe", result)
+            if (runGenerationGate.isCurrent(generation)) {
+                publishActionResult("v0.5 External Swipe", result)
+            }
         }
         if (queued) {
             invalidateObservationForAction("external_task_swipe")
-            handler.postDelayed(
-                { scheduleCapture() },
-                RETURN_CAPTURE_AFTER_BACK_MS,
-            )
+            postRunDelayed(RETURN_CAPTURE_AFTER_BACK_MS) {
+                scheduleCapture()
+            }
         }
     }
 
@@ -2518,10 +2568,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                             " rawPage=" + pageType.wireName,
                     )
                     globalBack()
-                    handler.postDelayed(
-                        { scheduleCapture() },
-                        RETURN_CAPTURE_AFTER_BACK_MS,
-                    )
+                    postRunDelayed(RETURN_CAPTURE_AFTER_BACK_MS) {
+                        scheduleCapture()
+                    }
                     return
                 }
             } else if (
@@ -2693,14 +2742,11 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         )
         globalBack()
 
-        handler.postDelayed(
-            {
-                if (oneBrowseStage == OneBrowseStage.RETURNING) {
-                    scheduleCapture()
-                }
-            },
-            RETURN_CAPTURE_AFTER_BACK_MS,
-        )
+        postRunDelayed(RETURN_CAPTURE_AFTER_BACK_MS) {
+            if (oneBrowseStage == OneBrowseStage.RETURNING) {
+                scheduleCapture()
+            }
+        }
     }
 
     private fun canRunOneBrowseReturnAction(): Boolean =
@@ -2711,8 +2757,17 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         bounds: com.coin11.taojinbi.observation.IntRect,
         reason: String,
     ): Boolean {
+        val generation = runGenerationGate.current()
         val queued = actionExecutor.tap(bounds) { result ->
-            publishActionResult("v0.4 Tap", result)
+            if (runGenerationGate.isCurrent(generation)) {
+                publishActionResult("v0.5 Tap", result)
+            } else {
+                Log.i(
+                    ONE_TASK_TAG,
+                    "drop stale tap callback generation=" + generation +
+                        " current=" + runGenerationGate.current(),
+                )
+            }
         }
         if (queued) {
             invalidateObservationForAction(reason)
@@ -2736,6 +2791,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(externalTaskWatchdog)
         taskListOcrInFlight = false
         oneBrowsePageTransitionPending = false
+        manualStopOverlay?.hide()
         oneBrowseStage =
             if (success) OneBrowseStage.DONE else OneBrowseStage.FAILED
         oneBrowseLastMessage = message
@@ -2789,6 +2845,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         buildString {
             append("stage=")
             append(oneBrowseStage)
+            append(" generation=")
+            append(runGenerationGate.current())
+            append(" overlay=")
+            append(if (manualStopOverlay?.isShowing() == true) "shown" else "hidden")
             append(" message=")
             append(oneBrowseLastMessage)
             if (oneBrowseTaskDescription.isNotBlank()) {
@@ -2958,10 +3018,32 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private fun captureOcrSnapshot(
         callback: (Result<OcrSnapshot>) -> Unit,
     ) {
+        val callbackGeneration = runGenerationGate.current()
+        val runScoped =
+            oneBrowseStage != OneBrowseStage.IDLE &&
+                oneBrowseStage != OneBrowseStage.DONE &&
+                oneBrowseStage != OneBrowseStage.FAILED &&
+                oneBrowseStage != OneBrowseStage.STOPPED
+
+        fun deliver(result: Result<OcrSnapshot>) {
+            if (
+                runScoped &&
+                !runGenerationGate.isCurrent(callbackGeneration)
+            ) {
+                Log.i(
+                    ONE_TASK_TAG,
+                    "drop stale OCR callback generation=" + callbackGeneration +
+                        " current=" + runGenerationGate.current(),
+                )
+                return
+            }
+            callback(result)
+        }
+
         val startedAt = SystemClock.elapsedRealtime()
         val currentPackage = rootInActiveWindow?.packageName?.toString()
         if (currentPackage == packageName) {
-            callback(Result.failure(IllegalStateException("前台是调试 App")))
+            deliver(Result.failure(IllegalStateException("前台是调试 App")))
             return
         }
 
@@ -2987,7 +3069,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     hardwareBuffer.close()
 
                     if (bitmap == null) {
-                        callback(
+                        deliver(
                             Result.failure(
                                 IllegalStateException("Bitmap.wrapHardwareBuffer 失败"),
                             ),
@@ -3008,12 +3090,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                             )
                         }
                         bitmap.recycle()
-                        callback(mapped)
+                        deliver(mapped)
                     }
                 }
 
                 override fun onFailure(errorCode: Int) {
-                    callback(
+                    deliver(
                         Result.failure(
                             IllegalStateException(
                                 "takeScreenshot errorCode=" + errorCode,
@@ -3215,7 +3297,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         fun debugStopCoinMainline(context: Context): String {
             debugClearQueuedCoinMainline(context)
-            return instance?.stopCoinMainlineManual()
+            return instance?.stopCoinMainlineManual(source = "adb")
                 ?: "accepted stop_coin_mainline: queued request cleared; service disconnected"
         }
 
