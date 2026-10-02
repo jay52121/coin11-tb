@@ -79,22 +79,34 @@ object RemoteExcludePool {
         }
     }
 
-    internal fun overlayFromJson(
+    internal fun overlay(
         base: RuleSet,
-        json: JSONObject,
+        schemaVersion: Int,
+        coinExcludeTags: List<String>,
+        skipTaskExtraWords: List<String>,
     ): RuleSet {
-        require(json.optInt("schema_version", 0) == 1) {
+        require(schemaVersion == 1) {
             "unsupported schema_version"
         }
 
-        val coin = strings(json, "coin_exclude_tags", required = true)
-        val extra = strings(json, "skip_task_extra_words", required = true)
-
         return base.copy(
-            coinExcludeTags = coin,
-            skipTaskExtraWords = extra,
+            coinExcludeTags = normalize(coinExcludeTags),
+            skipTaskExtraWords = normalize(skipTaskExtraWords),
         )
     }
+
+    internal fun overlayFromJson(
+        base: RuleSet,
+        json: JSONObject,
+    ): RuleSet =
+        overlay(
+            base = base,
+            schemaVersion = json.optInt("schema_version", 0),
+            coinExcludeTags =
+                strings(json, "coin_exclude_tags", required = true),
+            skipTaskExtraWords =
+                strings(json, "skip_task_extra_words", required = true),
+        )
 
     private fun refresh(context: Context): RemoteExcludePoolRefreshResult {
         var lastError: Throwable? = null
@@ -188,6 +200,17 @@ object RemoteExcludePool {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun normalize(values: List<String>): List<String> {
+        val seen = linkedSetOf<String>()
+        values.forEach { value ->
+            val text = value.trim()
+            if (text.isNotEmpty()) {
+                seen += text
+            }
+        }
+        return seen.toList()
     }
 
     private fun strings(

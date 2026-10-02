@@ -1,6 +1,5 @@
 package com.coin11.taojinbi.recognizer
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -15,18 +14,11 @@ class RemoteExcludePoolTest {
             skipTaskExtraWords = listOf("old-extra"),
         )
 
-        val result = RemoteExcludePool.overlayFromJson(
-            base,
-            JSONObject(
-                """
-                {
-                  "schema_version": 1,
-                  "revision": "test",
-                  "coin_exclude_tags": ["下单", "百度", "百度"],
-                  "skip_task_extra_words": ["抢红包", "趣头条"]
-                }
-                """.trimIndent(),
-            ),
+        val result = RemoteExcludePool.overlay(
+            base = base,
+            schemaVersion = 1,
+            coinExcludeTags = listOf("下单", "百度", "百度"),
+            skipTaskExtraWords = listOf("抢红包", "趣头条"),
         )
 
         assertEquals(listOf("下单", "百度"), result.coinExcludeTags)
@@ -37,17 +29,11 @@ class RemoteExcludePoolTest {
     @Test
     fun rejectsWrongSchema() {
         assertThrows(IllegalArgumentException::class.java) {
-            RemoteExcludePool.overlayFromJson(
-                RuleSet.DEFAULT,
-                JSONObject(
-                    """
-                    {
-                      "schema_version": 2,
-                      "coin_exclude_tags": [],
-                      "skip_task_extra_words": []
-                    }
-                    """.trimIndent(),
-                ),
+            RemoteExcludePool.overlay(
+                base = RuleSet.DEFAULT,
+                schemaVersion = 2,
+                coinExcludeTags = emptyList(),
+                skipTaskExtraWords = emptyList(),
             )
         }
     }
