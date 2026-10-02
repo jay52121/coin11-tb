@@ -595,7 +595,7 @@ object CoinTaskCandidateFinder {
     private const val DEFAULT_ACTION_PATTERN =
         "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐"
     private val DEFAULT_EXCLUDE_WORDS =
-        listOf("下单", "快手", "评价", "助力", "头条")
+        listOf("下单", "快手", "评价", "助力", "头条", "百度")
     private val DEFAULT_POLICY = CoinTaskPolicy(
         actionTextPattern = DEFAULT_ACTION_PATTERN,
         rewardButtonPattern = "领取奖励|立即领取|点击得",

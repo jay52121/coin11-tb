@@ -102,6 +102,23 @@ class CoinTaskCandidateFinderTest {
     }
 
     @Test
+    fun skipsBaiduTaskByConfiguredExcludeWord() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation(
+                node(0, "去百度App领现金(0/1)", 100, 400, 760, 500),
+                node(1, "去完成", 900, 410, 1200, 500),
+            ),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy.copy(
+                excludeWords = policy.excludeWords + "百度",
+            ),
+        )
+
+        assertNull(candidate)
+    }
+
+    @Test
     fun skipsToutiaoBeforeClick() {
         val candidate = CoinTaskCandidateFinder.findNext(
             observation = observation(

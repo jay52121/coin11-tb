@@ -36,7 +36,7 @@ data class RuleSet(
             earnWords = listOf("赚金币"),
             dailyVersionWords = listOf("回日常版"),
             allowDailyVersionFallback = false,
-            coinExcludeTags = listOf("下单", "快手", "评价", "助力", "头条"),
+            coinExcludeTags = listOf("下单", "快手", "评价", "助力", "头条", "百度"),
             skipTaskExtraWords = emptyList(),
             doneWords = listOf("已完成", "已领取", "已得", "任务已完成", "记得明天再来"),
             searchBrowseWords = listOf("搜索后浏览立得奖励", "搜索有福利", "淘宝精选", "搜索发现", "历史搜索"),
