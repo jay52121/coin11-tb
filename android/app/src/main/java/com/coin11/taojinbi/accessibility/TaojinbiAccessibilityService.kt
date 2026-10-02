@@ -582,6 +582,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             return "rejected busy stage=" + oneBrowseStage
         }
 
+        reloadCachedRemoteRules("coin_mainline_start")
+        refreshRemoteExcludePool()
+
         val observation = ObserverState.latestExternalObservation
             ?: return "rejected no Observation"
         if (!ObserverState.latestObservationValid) {
