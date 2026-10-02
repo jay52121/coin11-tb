@@ -14,7 +14,6 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.TextView
 import com.coin11.taojinbi.observation.IntRect
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal class ManualStopOverlayController(

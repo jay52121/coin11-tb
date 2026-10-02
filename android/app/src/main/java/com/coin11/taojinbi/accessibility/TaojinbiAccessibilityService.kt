@@ -33,6 +33,7 @@ import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskKind
 import com.coin11.taojinbi.task.CoinTaskPolicy
+import com.coin11.taojinbi.task.ExternalTaskPolicy
 import com.coin11.taojinbi.task.TaskPageContext
 import com.coin11.taojinbi.shizuku.ShizukuBridge
 import kotlin.random.Random
@@ -126,6 +127,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         val taskDescription: String,
         val startedAtMillis: Long,
         val userId: Int,
+        val skipAsUnsupported: Boolean,
     )
 
     private var externalTaskSession: ExternalTaskSession? = null
@@ -1519,10 +1521,17 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(coinEntryWaitRunnable)
         if (externalRecoveryPendingCompletion) {
             externalRecoveryPendingCompletion = false
+            val skippedExternal =
+                externalTaskSession?.skipAsUnsupported == true
             finishCurrentTaskOnDailyList(
                 observation = observation,
-                success = true,
-                message = "外部任务App已关闭并恢复任务列表",
+                success = !skippedExternal,
+                message =
+                    if (skippedExternal) {
+                        "被排除外部App已关闭并恢复任务列表"
+                    } else {
+                        "外部任务App已关闭并恢复任务列表"
+                    },
             )
             return
         }
@@ -2374,17 +2383,57 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
         handler.removeCallbacks(taskTransitionWatchdog)
         val now = System.currentTimeMillis()
+        val skipAsUnsupported =
+            ExternalTaskPolicy.shouldSkipPackage(packageName)
         externalTaskSession = ExternalTaskSession(
             packageName = packageName,
             taskKey = currentCoinTaskKey,
             taskDescription = oneBrowseTaskDescription,
             startedAtMillis = now,
             userId = coinMainlineTargetUserId,
+            skipAsUnsupported = skipAsUnsupported,
         )
         externalTaskSwipeCount = 0
         externalRecoveryBackCount = 0
         externalRecoveryFallbackLaunched = false
         externalRecoveryPendingCompletion = false
+
+        if (skipAsUnsupported) {
+            if (currentCoinTaskKey.isNotBlank()) {
+                coinTaskClickCounts[currentCoinTaskKey] =
+                    currentCoinTaskClickLimit.coerceAtLeast(2)
+            }
+            oneBrowseLog(
+                "外部包命中跳过规则 package=" + packageName +
+                    " task=" + oneBrowseTaskDescription,
+            )
+            val submitted = ShizukuBridge.forceStopPackage(
+                coinMainlineTargetUserId,
+                packageName,
+            )
+            if (!submitted) {
+                startOneBrowseReturn(
+                    shouldSucceed = false,
+                    reason = "被排除外部App force-stop 提交失败 package=" + packageName,
+                )
+                return true
+            }
+            oneBrowseLog(
+                "被排除外部App force-stop 已提交 package=" + packageName +
+                    " user=" + coinMainlineTargetUserId,
+            )
+            oneBrowseStage = OneBrowseStage.EXTERNAL_RECOVERING
+            oneBrowseStageDeadlineMillis =
+                now + EXTERNAL_RECOVERY_TIMEOUT_MS
+            handler.removeCallbacks(externalTaskWatchdog)
+            handler.postDelayed(
+                externalTaskWatchdog,
+                EXTERNAL_WATCHDOG_INTERVAL_MS,
+            )
+            scheduleCapture()
+            return true
+        }
+
         oneBrowseStage = OneBrowseStage.EXTERNAL_TASK
         oneBrowseStageDeadlineMillis = now + EXTERNAL_TASK_MAX_MS
 
@@ -2532,10 +2581,17 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     "外部任务恢复到 daily_task_list Observation #" +
                         observation.id,
                 )
+                val skippedExternal =
+                    externalTaskSession?.skipAsUnsupported == true
                 finishCurrentTaskOnDailyList(
                     observation = observation,
-                    success = true,
-                    message = "外部任务App已关闭并回到 daily_task_list",
+                    success = !skippedExternal,
+                    message =
+                        if (skippedExternal) {
+                            "被排除外部App已关闭并回到 daily_task_list"
+                        } else {
+                            "外部任务App已关闭并回到 daily_task_list"
+                        },
                 )
             }
 
