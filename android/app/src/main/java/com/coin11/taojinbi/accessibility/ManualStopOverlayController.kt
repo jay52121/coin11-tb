@@ -52,14 +52,14 @@ internal class ManualStopOverlayController(
         )
         val defaultX = (systemInsets.left + margin)
             .coerceIn(0, (displayWidth - size).coerceAtLeast(0))
+        val usableTop = systemInsets.top + margin
+        val usableBottom =
+            (displayHeight - systemInsets.bottom - size - margin)
+                .coerceAtLeast(usableTop)
         val defaultY = (
-            displayHeight - systemInsets.bottom - size - margin
-        ).coerceIn(
-            (systemInsets.top + margin).coerceAtMost(
-                (displayHeight - size).coerceAtLeast(0),
-            ),
-            (displayHeight - size).coerceAtLeast(0),
-        )
+            usableTop +
+                ((usableBottom - usableTop) * 0.45f).roundToInt()
+        ).coerceIn(usableTop, usableBottom)
         val savedLayoutVersion = prefs.getInt(PREF_LAYOUT_VERSION, 0)
         val useSavedPosition = savedLayoutVersion >= LAYOUT_VERSION
 
@@ -279,7 +279,7 @@ internal class ManualStopOverlayController(
         private const val PREF_X = "x"
         private const val PREF_Y = "y"
         private const val PREF_LAYOUT_VERSION = "layout_version"
-        private const val LAYOUT_VERSION = 2
+        private const val LAYOUT_VERSION = 3
         private const val STOPPED_VISIBLE_MS = 650L
         private const val RUNNING_COLOR = 0xD9D32F2F.toInt()
         private const val STOPPED_COLOR = 0xB86B7280.toInt()

@@ -33,7 +33,9 @@ import com.coin11.taojinbi.task.BrowseTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskCandidateFinder
 import com.coin11.taojinbi.task.CoinTaskKind
 import com.coin11.taojinbi.task.CoinTaskPolicy
+import com.coin11.taojinbi.task.ExternalLinkDialogPolicy
 import com.coin11.taojinbi.task.ExternalTaskPolicy
+import com.coin11.taojinbi.task.ReturnRecoveryPolicy
 import com.coin11.taojinbi.task.TaskPageContext
 import com.coin11.taojinbi.shizuku.ShizukuBridge
 import kotlin.random.Random
@@ -101,6 +103,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private var oneBrowseLastReturnActionAtMillis = 0L
     private var oneBrowseReturnLastObservationId: Long? = null
     private var oneBrowseReturnSameObservationTicks = 0
+    private var oneBrowseReturnUrlFallbackLaunched = false
     private var oneBrowseTaskDescription = ""
     private var oneBrowseReturnShouldSucceed = true
     private var oneBrowseLastMessage = "idle"
@@ -618,6 +621,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseLastReturnActionAtMillis = 0L
         oneBrowseReturnLastObservationId = null
         oneBrowseReturnSameObservationTicks = 0
+        oneBrowseReturnUrlFallbackLaunched = false
         oneBrowseTaskDescription = ""
         oneBrowseReturnShouldSucceed = true
         oneBrowseLastMessage = "idle"
@@ -664,6 +668,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     " rawPageType=" + pageType.wireName +
                     " Observation #" + observation.id,
             )
+        }
+
+        if (handleExternalLinkConfirmIfVisible(observation)) {
+            return
         }
 
         when (oneBrowseStage) {
@@ -922,6 +930,46 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 }
             }
         }
+    }
+
+    private fun handleExternalLinkConfirmIfVisible(
+        observation: com.coin11.taojinbi.observation.Observation,
+    ): Boolean {
+        if (
+            oneBrowseStage != OneBrowseStage.WAITING_BROWSE_PAGE &&
+            oneBrowseStage != OneBrowseStage.BROWSING
+        ) {
+            return false
+        }
+
+        val cancelBounds =
+            ExternalLinkDialogPolicy.findCancelBounds(observation)
+                ?: return false
+
+        if (currentCoinTaskKey.isNotBlank()) {
+            coinTaskClickCounts[currentCoinTaskKey] =
+                currentCoinTaskClickLimit.coerceAtLeast(2)
+        }
+
+        handler.removeCallbacks(oneBrowseTick)
+        oneBrowseLog(
+            "检测到淘宝外链确认页，点击取消并跳过当前任务 bounds=" +
+                cancelBounds,
+        )
+        val queued = tapBoundsForOneBrowse(
+            cancelBounds,
+            "external_link_dialog_cancel",
+        )
+        startOneBrowseReturn(
+            shouldSucceed = false,
+            reason =
+                if (queued) {
+                    "已点击外链确认页取消"
+                } else {
+                    "外链确认页取消未能点击，进入恢复"
+                },
+        )
+        return true
     }
 
     private fun enterTaskListForOneBrowse(
@@ -2764,6 +2812,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         oneBrowseReturnLastObservationId =
             ObserverState.latestExternalObservation?.id
         oneBrowseReturnSameObservationTicks = 0
+        oneBrowseReturnUrlFallbackLaunched = false
         oneBrowseLog(
             "开始返回任务列表：" + reason +
                 "；watchdog=" + RETURN_TIMEOUT_MS + "ms",
@@ -2786,23 +2835,47 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             oneBrowseReturnSameObservationTicks = 0
         }
 
-        if (now >= oneBrowseStageDeadlineMillis) {
-            completeOneBrowse(
-                success = false,
-                message =
-                    "返回任务列表超时；backs=" + oneBrowseBackCount +
-                        " lastObservation=" +
-                        (latestId?.let { "#" + it } ?: "(none)"),
-            )
+        if (oneBrowseReturnUrlFallbackLaunched) {
+            if (now >= oneBrowseStageDeadlineMillis) {
+                completeOneBrowse(
+                    success = false,
+                    message =
+                        "URL恢复淘金币超时；lastObservation=" +
+                            (latestId?.let { "#" + it } ?: "(none)"),
+                )
+                return
+            }
+            scheduleCapture()
             return
         }
 
-        if (oneBrowseBackCount >= MAX_RETURN_BACKS) {
+        if (
+            now >= oneBrowseStageDeadlineMillis ||
+            ReturnRecoveryPolicy.shouldUseCoinUrlFallback(
+                backCount = oneBrowseBackCount,
+                coinMainlineMode = coinMainlineMode,
+                targetUserId = coinMainlineTargetUserId,
+            )
+        ) {
+            if (
+                launchCoinHomeForReturnFallback(
+                    reason =
+                        if (now >= oneBrowseStageDeadlineMillis) {
+                            "返回任务列表超时"
+                        } else {
+                            "连续Back仍未返回任务列表"
+                        },
+                )
+            ) {
+                return
+            }
+
             completeOneBrowse(
                 success = false,
                 message =
-                    "连续 Back " + oneBrowseBackCount +
-                        " 次仍未返回任务列表；lastObservation=" +
+                    "返回任务列表失败且URL恢复不可用；backs=" +
+                        oneBrowseBackCount +
+                        " lastObservation=" +
                         (latestId?.let { "#" + it } ?: "(none)"),
             )
             return
@@ -2829,6 +2902,39 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 scheduleCapture()
             }
         }
+    }
+
+    private fun launchCoinHomeForReturnFallback(
+        reason: String,
+    ): Boolean {
+        if (
+            oneBrowseReturnUrlFallbackLaunched ||
+            !coinMainlineMode ||
+            coinMainlineTargetUserId < 0
+        ) {
+            return false
+        }
+
+        val submitted = ShizukuBridge.openCoinAsUser(
+            coinMainlineTargetUserId,
+            COIN_HOME_URL,
+        )
+        oneBrowseLog(
+            "RETURN URL fallback reason=" + reason +
+                " user=" + coinMainlineTargetUserId +
+                " submitted=" + submitted,
+        )
+        if (!submitted) {
+            return false
+        }
+
+        oneBrowseReturnUrlFallbackLaunched = true
+        oneBrowseStageDeadlineMillis =
+            System.currentTimeMillis() + RETURN_URL_FALLBACK_TIMEOUT_MS
+        oneBrowseBackCount = 0
+        oneBrowseLastReturnActionAtMillis = System.currentTimeMillis()
+        scheduleCapture()
+        return true
     }
 
     private fun canRunOneBrowseReturnAction(): Boolean =
@@ -2954,6 +3060,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 append(oneBrowseReturnLastObservationId?.let { "#" + it } ?: "(none)")
                 append(" returnSameTicks=")
                 append(oneBrowseReturnSameObservationTicks)
+                append(" urlFallback=")
+                append(oneBrowseReturnUrlFallbackLaunched)
             }
             append(" mode=")
             append(if (coinMainlineMode) "coin_mainline" else "one_browse")
@@ -3256,6 +3364,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val RESTART_ENTRY_TIMEOUT_MS = 15_000L
         private const val MAX_BROWSE_NEXT_TASK_HOPS = 8
         private const val RETURN_TIMEOUT_MS = 12_000L
+        private const val RETURN_URL_FALLBACK_TIMEOUT_MS = 12_000L
         private const val RETURN_ACTION_MIN_INTERVAL_MS = 900L
         private const val RETURN_BACK_SETTLE_MS = 450L
         private const val RETURN_WATCHDOG_INTERVAL_MS = 850L
