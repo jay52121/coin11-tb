@@ -449,6 +449,15 @@
         <div id="energy_exclude_editor" class="tag-editor energy"></div>
         <button class="energy-outline" onclick="saveExcludeTags('energy')">保存体力</button>
       </div>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button id="exclude_pool_sync_btn" onclick="syncExcludePool()">同步云端排除池</button>
+        <a
+          href="https://github.com/jay52121/coin11-tb/edit/main/cloud/exclude-pool.json"
+          target="_blank"
+          rel="noopener noreferrer"
+        >打开云端编辑</a>
+        <span id="exclude_pool_status" class="muted">云端排除池：未读取</span>
+      </div>
     </section>
 
     <section>
@@ -766,6 +775,42 @@
       editor.dataset.dirty = '0';
       renderTagEditor(editor, response[field] || value);
       await refresh();
+    }
+
+    async function loadExcludePoolStatus() {
+      const node = document.getElementById('exclude_pool_status');
+      try {
+        const state = await fetch('/api/exclude-pool', { cache: 'no-store' }).then(r => r.json());
+        const revision = state.revision || '-';
+        const checked = state.last_checked_at || '未同步';
+        const error = state.last_error ? `；错误: ${state.last_error}` : '';
+        node.textContent = `云端排除池 revision=${revision}；最近检查 ${checked}${error}`;
+      } catch (err) {
+        node.textContent = `云端排除池读取失败: ${err.message}`;
+      }
+    }
+
+    async function syncExcludePool() {
+      const button = document.getElementById('exclude_pool_sync_btn');
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/exclude-pool/sync?force=true', {
+          method: 'POST'
+        }).then(r => r.json());
+        if (!response.ok) {
+          throw new Error(response.state?.last_error || '同步失败');
+        }
+        document.getElementById('coin_exclude_editor').dataset.dirty = '0';
+        document.getElementById('energy_exclude_editor').dataset.dirty = '0';
+        await loadRules();
+        await refresh();
+      } catch (err) {
+        document.getElementById('exclude_pool_status').textContent =
+          `云端排除池同步失败: ${err.message}`;
+      } finally {
+        button.disabled = false;
+        await loadExcludePoolStatus();
+      }
     }
 
     async function clearLogs() {
@@ -1338,6 +1383,7 @@
 
     refresh();
     loadRules();
+    loadExcludePoolStatus();
     setTimeout(autoStartOnLoad, 500);
     setInterval(refresh, 1000);
   </script>
