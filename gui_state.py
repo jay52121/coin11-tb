@@ -28,6 +28,9 @@ REMOTE_EXCLUDE_POOL_URL = os.environ.get(
     "TJB_EXCLUDE_POOL_URL",
     "https://raw.githubusercontent.com/jay52121/coin11-tb/main/cloud/exclude-pool.json",
 )
+REMOTE_EXCLUDE_POOL_FALLBACK_URL = (
+    "https://cdn.jsdelivr.net/gh/jay52121/coin11-tb@main/cloud/exclude-pool.json"
+)
 REMOTE_EXCLUDE_POOL_EDIT_URL = (
     "https://github.com/jay52121/coin11-tb/edit/main/cloud/exclude-pool.json"
 )
@@ -194,15 +197,39 @@ def sync_remote_exclude_pool(force=False, timeout=3.0):
     checked_at = now_text()
     previous = read_json(EXCLUDE_POOL_SYNC_STATE_PATH, {})
     try:
-        request = urllib.request.Request(
-            REMOTE_EXCLUDE_POOL_URL,
-            headers={
-                "User-Agent": "coin11-tb-mac-rule-sync/1",
-                "Cache-Control": "no-cache",
-            },
+        configured_url = os.environ.get("TJB_EXCLUDE_POOL_URL", "").strip()
+        source_urls = (
+            [configured_url]
+            if configured_url
+            else [REMOTE_EXCLUDE_POOL_URL, REMOTE_EXCLUDE_POOL_FALLBACK_URL]
         )
-        with urllib.request.urlopen(request, timeout=float(timeout)) as response:
-            raw = response.read(262144)
+        raw = None
+        source_url = ""
+        last_fetch_error = None
+        for candidate_url in source_urls:
+            try:
+                request = urllib.request.Request(
+                    candidate_url,
+                    headers={
+                        "User-Agent": "coin11-tb-mac-rule-sync/1",
+                        "Cache-Control": "no-cache",
+                    },
+                )
+                with urllib.request.urlopen(
+                    request,
+                    timeout=float(timeout),
+                ) as response:
+                    raw = response.read(262144)
+                source_url = candidate_url
+                break
+            except Exception as exc:
+                last_fetch_error = exc
+
+        if raw is None:
+            if last_fetch_error is not None:
+                raise last_fetch_error
+            raise RuntimeError("no exclude pool source URL")
+
         payload = json.loads(raw.decode("utf-8"))
         pool = _validate_remote_exclude_pool(payload)
         digest = hashlib.sha256(raw).hexdigest()
@@ -222,7 +249,7 @@ def sync_remote_exclude_pool(force=False, timeout=3.0):
 
         state = {
             "ok": True,
-            "source_url": REMOTE_EXCLUDE_POOL_URL,
+            "source_url": source_url,
             "edit_url": REMOTE_EXCLUDE_POOL_EDIT_URL,
             "revision": pool.get("revision", ""),
             "remote_updated_at": pool.get("updated_at", ""),
