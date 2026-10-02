@@ -27,6 +27,7 @@ from gui_state import (
     read_rules,
     read_status,
     reset_state,
+    push_local_exclude_pool_to_cloud,
     sync_remote_exclude_pool,
     update_status,
     write_control,
@@ -461,6 +462,23 @@ def update_exclude_tags(payload: dict):
 @app.get("/api/exclude-pool")
 def exclude_pool_status():
     return read_exclude_pool_sync_state()
+
+
+@app.post("/api/exclude-pool/push")
+def push_exclude_pool():
+    state = push_local_exclude_pool_to_cloud(timeout=8.0)
+    if state.get("ok"):
+        append_log(
+            "本地排除词已推送云端 "
+            f"revision={state.get('revision', '')} "
+            f"commit={state.get('commit_sha', '')}"
+        )
+    else:
+        append_log(
+            "推送云端排除词失败: " +
+            str(state.get("error", "unknown"))
+        )
+    return state
 
 
 @app.post("/api/exclude-pool/sync")
