@@ -2758,6 +2758,14 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         bounds: com.coin11.taojinbi.observation.IntRect,
         reason: String,
     ): Boolean {
+        if (manualStopOverlay?.intersects(bounds) == true) {
+            oneBrowseLog(
+                "拒绝自动点击：目标与Manual Stop overlay重叠 reason=" +
+                    reason + " bounds=" + bounds,
+            )
+            return false
+        }
+
         val generation = runGenerationGate.current()
         val queued = actionExecutor.tap(bounds) { result ->
             if (runGenerationGate.isCurrent(generation)) {

@@ -10,8 +10,10 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.TextView
+import com.coin11.taojinbi.observation.IntRect
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -43,9 +45,24 @@ internal class ManualStopOverlayController(
 
         val size = dp(48)
         val margin = dp(12)
-        val display = service.resources.displayMetrics
-        val defaultX = (display.widthPixels - size - margin).coerceAtLeast(0)
-        val defaultY = (display.heightPixels / 3).coerceAtLeast(0)
+        val metrics = windowManager.currentWindowMetrics
+        val displayWidth = metrics.bounds.width()
+        val displayHeight = metrics.bounds.height()
+        val systemInsets = metrics.windowInsets.getInsetsIgnoringVisibility(
+            WindowInsets.Type.systemBars(),
+        )
+        val defaultX = (systemInsets.left + margin)
+            .coerceIn(0, (displayWidth - size).coerceAtLeast(0))
+        val defaultY = (
+            displayHeight - systemInsets.bottom - size - margin
+        ).coerceIn(
+            (systemInsets.top + margin).coerceAtMost(
+                (displayHeight - size).coerceAtLeast(0),
+            ),
+            (displayHeight - size).coerceAtLeast(0),
+        )
+        val savedLayoutVersion = prefs.getInt(PREF_LAYOUT_VERSION, 0)
+        val useSavedPosition = savedLayoutVersion >= LAYOUT_VERSION
 
         val params = WindowManager.LayoutParams(
             size,
@@ -57,10 +74,14 @@ internal class ManualStopOverlayController(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt(PREF_X, defaultX)
-                .coerceIn(0, (display.widthPixels - size).coerceAtLeast(0))
-            y = prefs.getInt(PREF_Y, defaultY)
-                .coerceIn(0, (display.heightPixels - size).coerceAtLeast(0))
+            x = (
+                if (useSavedPosition) prefs.getInt(PREF_X, defaultX)
+                else defaultX
+            ).coerceIn(0, (displayWidth - size).coerceAtLeast(0))
+            y = (
+                if (useSavedPosition) prefs.getInt(PREF_Y, defaultY)
+                else defaultY
+            ).coerceIn(0, (displayHeight - size).coerceAtLeast(0))
         }
 
         val view = TextView(service).apply {
@@ -99,31 +120,44 @@ internal class ManualStopOverlayController(
                         MotionEvent.ACTION_MOVE -> {
                             val dx = (event.rawX - downRawX).roundToInt()
                             val dy = (event.rawY - downRawY).roundToInt()
-                            if (
-                                abs(dx) > touchSlop ||
-                                abs(dy) > touchSlop
-                            ) {
+                            if (OverlayGesturePolicy.isDrag(dx, dy, touchSlop)) {
                                 dragging = true
                             }
 
                             if (dragging) {
-                                val maxX =
-                                    (display.widthPixels - size).coerceAtLeast(0)
-                                val maxY =
-                                    (display.heightPixels - size).coerceAtLeast(0)
-                                params.x = (startX + dx).coerceIn(0, maxX)
-                                params.y = (startY + dy).coerceIn(0, maxY)
-                                runCatching {
-                                    windowManager.updateViewLayout(v, params)
-                                }.onFailure { error ->
-                                    Log.w(TAG, "update overlay position failed", error)
-                                }
+                                moveOverlay(
+                                    view = v,
+                                    params = params,
+                                    x = startX + dx,
+                                    y = startY + dy,
+                                    displayWidth = displayWidth,
+                                    displayHeight = displayHeight,
+                                    size = size,
+                                )
                             }
                             return true
                         }
 
                         MotionEvent.ACTION_UP -> {
-                            if (dragging) {
+                            val finalDx = (event.rawX - downRawX).roundToInt()
+                            val finalDy = (event.rawY - downRawY).roundToInt()
+                            val finalIsDrag =
+                                dragging ||
+                                    OverlayGesturePolicy.isDrag(
+                                        finalDx,
+                                        finalDy,
+                                        touchSlop,
+                                    )
+                            if (finalIsDrag) {
+                                moveOverlay(
+                                    view = v,
+                                    params = params,
+                                    x = startX + finalDx,
+                                    y = startY + finalDy,
+                                    displayWidth = displayWidth,
+                                    displayHeight = displayHeight,
+                                    size = size,
+                                )
                                 persistPosition(params)
                             } else {
                                 v.performClick()
@@ -149,7 +183,13 @@ internal class ManualStopOverlayController(
         }.onSuccess {
             button = view
             layoutParams = params
-            Log.i(TAG, "manual stop overlay shown")
+            if (!useSavedPosition) {
+                persistPosition(params)
+            }
+            Log.i(
+                TAG,
+                "manual stop overlay shown x=" + params.x + " y=" + params.y,
+            )
         }.onFailure { error ->
             Log.w(TAG, "show manual stop overlay failed", error)
         }
@@ -161,6 +201,18 @@ internal class ManualStopOverlayController(
         view.isEnabled = false
         applyStoppedVisual(view)
         view.postDelayed(hideRunnable, STOPPED_VISIBLE_MS)
+    }
+
+    fun intersects(bounds: IntRect): Boolean {
+        val params = layoutParams ?: return false
+        val left = params.x
+        val top = params.y
+        val right = left + params.width.coerceAtLeast(1)
+        val bottom = top + params.height.coerceAtLeast(1)
+        return bounds.left < right &&
+            bounds.right > left &&
+            bounds.top < bottom &&
+            bounds.bottom > top
     }
 
     fun hide() {
@@ -175,10 +227,29 @@ internal class ManualStopOverlayController(
         layoutParams = null
     }
 
+    private fun moveOverlay(
+        view: View,
+        params: WindowManager.LayoutParams,
+        x: Int,
+        y: Int,
+        displayWidth: Int,
+        displayHeight: Int,
+        size: Int,
+    ) {
+        params.x = x.coerceIn(0, (displayWidth - size).coerceAtLeast(0))
+        params.y = y.coerceIn(0, (displayHeight - size).coerceAtLeast(0))
+        runCatching {
+            windowManager.updateViewLayout(view, params)
+        }.onFailure { error ->
+            Log.w(TAG, "update overlay position failed", error)
+        }
+    }
+
     private fun persistPosition(params: WindowManager.LayoutParams) {
         prefs.edit()
             .putInt(PREF_X, params.x)
             .putInt(PREF_Y, params.y)
+            .putInt(PREF_LAYOUT_VERSION, LAYOUT_VERSION)
             .apply()
     }
 
@@ -208,6 +279,8 @@ internal class ManualStopOverlayController(
         private const val PREFS_NAME = "manual_stop_overlay"
         private const val PREF_X = "x"
         private const val PREF_Y = "y"
+        private const val PREF_LAYOUT_VERSION = "layout_version"
+        private const val LAYOUT_VERSION = 2
         private const val STOPPED_VISIBLE_MS = 650L
         private const val RUNNING_COLOR = 0xD9D32F2F.toInt()
         private const val STOPPED_COLOR = 0xB86B7280.toInt()
