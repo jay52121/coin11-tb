@@ -21,11 +21,13 @@ from gui_state import (
     clear_log,
     read_control,
     read_coin_records,
+    read_exclude_pool_sync_state,
     read_logs,
     read_key_logs,
     read_rules,
     read_status,
     reset_state,
+    sync_remote_exclude_pool,
     update_status,
     write_control,
     write_rules,
@@ -175,6 +177,18 @@ def start_task_process(source="api", mode="taojinbi", run_all_users=None, user_i
         return {"ok": False, "error": f"不支持的Android用户: {selected_user}"}
     run_all = bool(control.get("run_all_users", False)) if run_all_users is None else bool(run_all_users)
     control = write_control(android_user_id=selected_user, run_all_users=run_all)
+    sync_state = sync_remote_exclude_pool(force=False, timeout=2.5)
+    if sync_state.get("ok") and sync_state.get("applied"):
+        append_log(
+            "云端排除词已同步 revision=" +
+            str(sync_state.get("revision", ""))
+        )
+    elif not sync_state.get("ok"):
+        append_log(
+            "云端排除词同步失败，继续使用本地规则: " +
+            str(sync_state.get("last_error", "unknown"))
+        )
+
     rules = read_rules()
     active_tags = rules.get("energy_exclude_tags", []) if mode == "energy" else rules.get("coin_exclude_tags", [])
     if not active_tags:
@@ -441,6 +455,40 @@ def update_exclude_tags(payload: dict):
         "ok": True,
         "coin_exclude_tags": rules.get("coin_exclude_tags", []),
         "energy_exclude_tags": rules.get("energy_exclude_tags", []),
+    }
+
+
+@app.get("/api/exclude-pool")
+def exclude_pool_status():
+    return read_exclude_pool_sync_state()
+
+
+@app.post("/api/exclude-pool/sync")
+def sync_exclude_pool(force: bool = Query(default=True)):
+    state = sync_remote_exclude_pool(force=force, timeout=4.0)
+    rules = read_rules()
+    update_status(
+        exclude_tags=rules.get("coin_exclude_tags", []),
+        coin_exclude_tags=rules.get("coin_exclude_tags", []),
+        energy_exclude_tags=rules.get("energy_exclude_tags", []),
+    )
+    if state.get("ok"):
+        append_log(
+            "手动同步云端排除词完成 "
+            f"revision={state.get('revision', '')} "
+            f"applied={state.get('applied', False)}"
+        )
+    else:
+        append_log(
+            "手动同步云端排除词失败: " +
+            str(state.get("last_error", "unknown"))
+        )
+    return {
+        "ok": bool(state.get("ok")),
+        "state": state,
+        "coin_exclude_tags": rules.get("coin_exclude_tags", []),
+        "energy_exclude_tags": rules.get("energy_exclude_tags", []),
+        "skip_task_extra_words": rules.get("skip_task_extra_words", []),
     }
 
 
