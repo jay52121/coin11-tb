@@ -40,9 +40,9 @@ REMOTE_EXCLUDE_POOL_KEYS = (
 DEFAULT_CONTROL = {
     "stop": False,
     "pause": False,
-    "exclude_tags": ["下单", "快手", "评价", "助力"],
-    "coin_exclude_tags": ["下单", "快手", "评价", "助力"],
-    "energy_exclude_tags": ["下单", "快手", "评价", "助力", "分享", "每拉"],
+    "exclude_tags": ["下单","快手","评价","助力","头条","百度"],
+    "coin_exclude_tags": ["下单","快手","评价","助力","头条","百度"],
+    "energy_exclude_tags": ["下单","快手","评价","助力","分享","每拉"],
     "android_user_id": "0",
     "run_all_users": False,
     "allow_daily_version_fallback": False,
@@ -73,9 +73,9 @@ DEFAULT_STATUS = {
 
 DEFAULT_RULES = {
     "app_version": "mac-refactor-20260605-033156",
-    "exclude_tags": ["下单", "快手", "评价", "助力"],
-    "coin_exclude_tags": ["下单", "快手", "评价", "助力"],
-    "energy_exclude_tags": ["下单", "快手", "评价", "助力", "分享", "每拉"],
+    "exclude_tags": ["下单","快手","评价","助力","头条","百度"],
+    "coin_exclude_tags": ["下单","快手","评价","助力","头条","百度"],
+    "energy_exclude_tags": ["下单","快手","评价","助力","分享","每拉"],
     "allow_daily_version_fallback": False,
     "enable_jump_energy": True,
     "action_text_pattern": "去完成|去逛逛|去浏览|逛一逛|立即领|去领取|去看看|搜一下|玩一把|捐一笔|逛一下|点击去逛|领取奖励|立即领取|点击得|爱心捐|去兑换",
