@@ -25,6 +25,7 @@ import com.coin11.taojinbi.recognizer.PageRecognizer
 import com.coin11.taojinbi.recognizer.PageType
 import com.coin11.taojinbi.recognizer.RecognitionSnapshot
 import com.coin11.taojinbi.recognizer.RecognitionState
+import com.coin11.taojinbi.recognizer.RemoteExcludePool
 import com.coin11.taojinbi.recognizer.RuleSet
 import com.coin11.taojinbi.recognizer.RulesLoader
 import com.coin11.taojinbi.task.BrowseContextPhase
@@ -46,7 +47,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var pageRecognizer: PageRecognizer
     private lateinit var actionExecutor: AccessibilityActionExecutor
+    private lateinit var baseRules: RuleSet
     private lateinit var rules: RuleSet
+    private var remoteRuleSyncInFlight = false
+    private var remoteRuleSource = "remote cache not loaded"
     private val runGenerationGate = RunGenerationGate()
     private var manualStopOverlay: ManualStopOverlayController? = null
     private var lastCaptureAt = 0L
@@ -54,6 +58,13 @@ class TaojinbiAccessibilityService : AccessibilityService() {
 
     private val captureRunnable = Runnable {
         captureCurrentWindow()
+    }
+
+    private val remoteRuleRefreshRunnable = object : Runnable {
+        override fun run() {
+            refreshRemoteExcludePool()
+            handler.postDelayed(this, REMOTE_RULE_REFRESH_INTERVAL_MS)
+        }
     }
 
     private enum class OneBrowseStage {
@@ -305,7 +316,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
 
         val loadedRules = RulesLoader.load(this)
-        rules = loadedRules.rules
+        baseRules = loadedRules.rules
+        val cachedRemote = RemoteExcludePool.applyCached(this, baseRules)
+        rules = cachedRemote.rules
+        remoteRuleSource = cachedRemote.source
         pageRecognizer = PageRecognizer(rules)
         actionExecutor = AccessibilityActionExecutor(this)
         manualStopOverlay = ManualStopOverlayController(
@@ -315,8 +329,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             },
         )
         RecognitionState.configureRules(
-            source = loadedRules.source,
-            error = loadedRules.error,
+            source = loadedRules.source + "; " + remoteRuleSource,
+            error = loadedRules.error ?: cachedRemote.error,
         )
 
         instance = this
@@ -334,6 +348,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 loadedRules.error?.let { append("；fallback=$it") }
             },
         )
+        handler.removeCallbacks(remoteRuleRefreshRunnable)
+        handler.post(remoteRuleRefreshRunnable)
         scheduleCapture()
     }
 
@@ -370,6 +386,59 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         Log.w(TAG, "onDestroy " + detail)
         CapabilityState.publish("Accessibility", "服务已销毁。" + detail)
         super.onDestroy()
+    }
+
+    private fun rulesCanHotReload(): Boolean =
+        oneBrowseStage == OneBrowseStage.IDLE ||
+            oneBrowseStage == OneBrowseStage.DONE ||
+            oneBrowseStage == OneBrowseStage.FAILED ||
+            oneBrowseStage == OneBrowseStage.STOPPED
+
+    private fun reloadCachedRemoteRules(reason: String) {
+        val applied = RemoteExcludePool.applyCached(this, baseRules)
+        rules = applied.rules
+        remoteRuleSource = applied.source
+        pageRecognizer = PageRecognizer(rules)
+        RecognitionState.configureRules(
+            source = "assets/rules.json; " + remoteRuleSource,
+            error = applied.error,
+        )
+        Log.i(
+            ONE_TASK_TAG,
+            "排除词缓存已加载 reason=" + reason +
+                " source=" + remoteRuleSource +
+                " coin=" + rules.coinExcludeTags.size +
+                " extra=" + rules.skipTaskExtraWords.size,
+        )
+    }
+
+    private fun refreshRemoteExcludePool() {
+        if (remoteRuleSyncInFlight) {
+            return
+        }
+        remoteRuleSyncInFlight = true
+        RemoteExcludePool.refreshAsync(this) { result ->
+            handler.post {
+                remoteRuleSyncInFlight = false
+                if (result.ok) {
+                    if (rulesCanHotReload()) {
+                        reloadCachedRemoteRules("remote_refresh")
+                    } else {
+                        Log.i(
+                            ONE_TASK_TAG,
+                            "云端排除词已缓存，当前任务运行中，下一轮生效 revision=" +
+                                result.revision,
+                        )
+                    }
+                } else {
+                    Log.w(
+                        ONE_TASK_TAG,
+                        "云端排除词同步失败，继续使用本地缓存: " +
+                            result.error,
+                    )
+                }
+            }
+        }
     }
 
     private fun showManualStopOverlay() {
@@ -447,6 +516,9 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         ) {
             return "rejected busy stage=" + oneBrowseStage
         }
+
+        reloadCachedRemoteRules("run_start")
+        refreshRemoteExcludePool()
 
         val observation = ObserverState.latestExternalObservation
             ?: return "rejected no Observation"
@@ -3045,6 +3117,8 @@ class TaojinbiAccessibilityService : AccessibilityService() {
             append(runGenerationGate.current())
             append(" overlay=")
             append(if (manualStopOverlay?.isShowing() == true) "shown" else "hidden")
+            append(" rules=")
+            append(remoteRuleSource)
             append(" message=")
             append(oneBrowseLastMessage)
             if (oneBrowseTaskDescription.isNotBlank()) {
@@ -3341,6 +3415,7 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         private const val TAOBAO_PACKAGE = "com.taobao.taobao"
         private const val MIN_CAPTURE_INTERVAL_MS = 350L
         private const val EVENT_SETTLE_MS = 120L
+        private const val REMOTE_RULE_REFRESH_INTERVAL_MS = 60_000L
 
         private const val SIGN_ENTRY_WAIT_MS = 8_000L
         private const val SIGN_ENTRY_RETRY_MS = 800L
@@ -3493,6 +3568,12 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 .apply()
             return "accepted run_coin_mainline queued awaiting service/coin page"
         }
+
+        fun debugSyncRemoteRules(): String =
+            instance?.let { service ->
+                service.refreshRemoteExcludePool()
+                "accepted sync_rules"
+            } ?: "rejected sync_rules: accessibility service not connected"
 
         fun debugStopCoinMainline(context: Context): String {
             debugClearQueuedCoinMainline(context)
