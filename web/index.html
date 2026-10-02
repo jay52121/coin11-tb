@@ -450,7 +450,8 @@
         <button class="energy-outline" onclick="saveExcludeTags('energy')">保存体力</button>
       </div>
       <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <button id="exclude_pool_sync_btn" onclick="syncExcludePool()">同步云端排除池</button>
+        <button id="exclude_pool_sync_btn" onclick="syncExcludePool()">拉取云端</button>
+        <button id="exclude_pool_push_btn" onclick="pushExcludePool()">推送本地到云端</button>
         <a
           href="https://github.com/jay52121/coin11-tb/edit/main/cloud/exclude-pool.json"
           target="_blank"
@@ -807,6 +808,27 @@
       } catch (err) {
         document.getElementById('exclude_pool_status').textContent =
           `云端排除池同步失败: ${err.message}`;
+      } finally {
+        button.disabled = false;
+        await loadExcludePoolStatus();
+      }
+    }
+
+    async function pushExcludePool() {
+      const button = document.getElementById('exclude_pool_push_btn');
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/exclude-pool/push', {
+          method: 'POST'
+        }).then(r => r.json());
+        if (!response.ok) {
+          throw new Error(response.error || '推送失败');
+        }
+        document.getElementById('exclude_pool_status').textContent =
+          `已推送云端 revision=${response.revision || '-'}`;
+      } catch (err) {
+        document.getElementById('exclude_pool_status').textContent =
+          `推送云端失败: ${err.message}`;
       } finally {
         button.disabled = false;
         await loadExcludePoolStatus();
