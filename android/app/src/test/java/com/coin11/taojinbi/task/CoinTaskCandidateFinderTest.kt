@@ -212,6 +212,21 @@ class CoinTaskCandidateFinderTest {
     }
 
     @Test
+    fun rejectsTopClippedActionCandidate() {
+        val candidate = CoinTaskCandidateFinder.findNext(
+            observation = observation(
+                node(0, "搜一搜你心仪的宝贝(0/5)", 100, 0, 760, 62),
+                node(1, "去完成", 993, 0, 1204, 62),
+            ),
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertNull(candidate)
+    }
+
+    @Test
     fun usesSmallestClickableContainerForActionText() {
         val candidate = CoinTaskCandidateFinder.findNext(
             observation = observation(

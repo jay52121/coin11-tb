@@ -370,6 +370,10 @@ object CoinTaskCandidateFinder {
         rewardRegex: Regex,
         source: String,
     ): CoinTaskCandidate? {
+        if (!isSafeClickBounds(bounds)) {
+            return null
+        }
+
         if (
             intrinsicExcludedContextWords.any { context.contains(it) } ||
             excludedByRuleWords(context, policy.excludeWords) ||
@@ -574,6 +578,12 @@ object CoinTaskCandidateFinder {
     private fun hasUsableBounds(bounds: IntRect): Boolean =
         bounds.right > bounds.left && bounds.bottom > bounds.top
 
+    private fun isSafeClickBounds(bounds: IntRect): Boolean =
+        bounds.top >= SAFE_TOP_INSET_PX &&
+            bounds.bottom - bounds.top >= MIN_SAFE_CLICK_HEIGHT_PX
+
+    private const val SAFE_TOP_INSET_PX = 72
+    private const val MIN_SAFE_CLICK_HEIGHT_PX = 48
     private const val ROW_Y_TOLERANCE = 130
     private const val OCR_ROW_Y_TOLERANCE = 115
     private const val ROW_MIN_TOP = 180

@@ -726,11 +726,24 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     }
                     PageType.COIN_HOME -> {
                         if (taskTransitionSettled(observation)) {
-                            oneBrowseLog(
-                                "任务点击后 settle 完成仍为 coin_home，按Mac语义重新进入任务列表",
-                            )
-                            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
-                            enterTaskListForOneBrowse(observation)
+                            val entry =
+                                BrowseTaskCandidateFinder.findCoinTaskEntry(
+                                    observation,
+                                    rules.earnMoreWords,
+                                    rules.earnWords,
+                                )
+                            if (entry != null) {
+                                oneBrowseLog(
+                                    "任务点击后确认真实 coin_home 入口，重新进入任务列表",
+                                )
+                                oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                                enterTaskListForOneBrowse(observation)
+                            } else {
+                                oneBrowseLog(
+                                    "任务点击后 raw=coin_home 但无赚金币入口；视为承接页继续等待 Observation #" +
+                                        observation.id,
+                                )
+                            }
                         } else {
                             oneBrowseLog(
                                 "忽略任务点击后2秒内 transient coin_home Observation #" +
@@ -782,11 +795,23 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                     }
                     PageType.COIN_HOME -> {
                         if (taskTransitionSettled(observation)) {
-                            oneBrowseLog(
-                                "奖励点击后 settle 完成仍为 coin_home，重新进入任务列表",
-                            )
-                            oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
-                            enterTaskListForOneBrowse(observation)
+                            val entry =
+                                BrowseTaskCandidateFinder.findCoinTaskEntry(
+                                    observation,
+                                    rules.earnMoreWords,
+                                    rules.earnWords,
+                                )
+                            if (entry != null) {
+                                oneBrowseLog(
+                                    "奖励点击后确认真实 coin_home 入口，重新进入任务列表",
+                                )
+                                oneBrowseStage = OneBrowseStage.FINDING_COIN_ENTRY
+                                enterTaskListForOneBrowse(observation)
+                            } else {
+                                oneBrowseLog(
+                                    "奖励点击后 raw=coin_home 但无赚金币入口；继续等待",
+                                )
+                            }
                         } else {
                             oneBrowseLog(
                                 "忽略奖励点击后2秒内 transient coin_home Observation #" +

@@ -74,6 +74,22 @@ class PageRecognizerTest {
     }
 
     @Test
+    fun residualCoinShellOnRedPacketPageIsNotCoinHome() {
+        val result = recognizer.recognize(
+            observation(
+                "com.taobao.taobao",
+                "淘金币首页",
+                "app",
+                "eva-canvas",
+                "去签到领红包",
+                "红包活动",
+            ),
+        )
+
+        assertNotEquals(PageType.COIN_HOME, result.pageType)
+    }
+
+    @Test
     fun recognizesCoinHome() {
         assertPage(
             PageType.COIN_HOME,

@@ -235,7 +235,11 @@ class PageRecognizer(
     private fun looksLikeCoinHomeShell(texts: List<String>): Boolean =
         hasAny(texts, listOf("淘金币首页")) &&
             hasAny(texts, listOf("app")) &&
-            hasAny(texts, listOf("eva-canvas", "ice-container"))
+            hasAny(texts, listOf("eva-canvas", "ice-container")) &&
+            hasAny(
+                texts,
+                listOf("赚更多金币", "赚金币抵钱", "今日累计奖励", "完成进度"),
+            )
 
     private fun looksLikeCoinHomePage(texts: List<String>): Boolean {
         if (looksLikeCoinTaskPanel(texts)) return false
@@ -244,15 +248,20 @@ class PageRecognizer(
             return false
         }
 
-        val hasCoinHomeAnchor = hasAny(
+        val hasStrongCoinAnchor = hasAny(
             texts,
-            listOf("淘金币首页", "淘金币标题", "赚更多金币", "赚金币抵钱"),
+            listOf("淘金币标题", "赚更多金币", "赚金币抵钱"),
         )
-        val hasCoinHomeSupport = hasAny(texts, rules.coinHomeWords)
+        val hasCoinHomeTitle = hasAny(texts, listOf("淘金币首页"))
+        val hasSpecificCoinSupport = hasAny(
+            texts,
+            listOf("可抵", "赚更多金币", "赚金币抵钱", "今日累计奖励", "完成进度"),
+        )
 
-        return hasCoinHomeAnchor &&
-            hasCoinHomeSupport &&
-            !looksLikeSearchBrowsePage(texts)
+        return (
+            hasStrongCoinAnchor ||
+                (hasCoinHomeTitle && hasSpecificCoinSupport)
+        ) && !looksLikeSearchBrowsePage(texts)
     }
 
     private fun looksLikeTaobaoHomePage(texts: List<String>): Boolean {
