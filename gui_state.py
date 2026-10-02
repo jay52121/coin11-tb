@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 
@@ -16,6 +18,20 @@ RULES_PATH = Path(os.environ.get("TJB_RULES_PATH", DEFAULT_SHARED_RULES_PATH if 
 RUN_LOG_PATH = LOG_DIR / "run.log"
 KEY_LOG_PATH = LOG_DIR / "key.log"
 COIN_RECORD_PATH = RUNTIME_DIR / "淘金币记录.json"
+EXCLUDE_POOL_CACHE_PATH = RUNTIME_DIR / "exclude-pool.remote.json"
+EXCLUDE_POOL_SYNC_STATE_PATH = RUNTIME_DIR / "exclude-pool.sync.json"
+REMOTE_EXCLUDE_POOL_URL = os.environ.get(
+    "TJB_EXCLUDE_POOL_URL",
+    "https://raw.githubusercontent.com/jay52121/coin11-tb/main/cloud/exclude-pool.json",
+)
+REMOTE_EXCLUDE_POOL_EDIT_URL = (
+    "https://github.com/jay52121/coin11-tb/edit/main/cloud/exclude-pool.json"
+)
+REMOTE_EXCLUDE_POOL_KEYS = (
+    "coin_exclude_tags",
+    "energy_exclude_tags",
+    "skip_task_extra_words",
+)
 
 DEFAULT_CONTROL = {
     "stop": False,
@@ -125,6 +141,111 @@ def atomic_write_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
     os.replace(tmp_path, path)
+
+
+def _normalize_string_list(value):
+    if not isinstance(value, list):
+        raise ValueError("exclude pool field must be a list")
+    result = []
+    seen = set()
+    for item in value:
+        text = str(item).strip()
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
+
+
+def _validate_remote_exclude_pool(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("exclude pool root must be an object")
+    if int(payload.get("schema_version", 0)) != 1:
+        raise ValueError("unsupported exclude pool schema_version")
+
+    normalized = {
+        "schema_version": 1,
+        "revision": str(payload.get("revision", "")).strip(),
+        "updated_at": str(payload.get("updated_at", "")).strip(),
+    }
+    for key in REMOTE_EXCLUDE_POOL_KEYS:
+        if key in payload:
+            normalized[key] = _normalize_string_list(payload.get(key))
+    if "coin_exclude_tags" not in normalized:
+        raise ValueError("coin_exclude_tags is required")
+    if "skip_task_extra_words" not in normalized:
+        raise ValueError("skip_task_extra_words is required")
+    return normalized
+
+
+def read_exclude_pool_sync_state():
+    state = read_json(EXCLUDE_POOL_SYNC_STATE_PATH, {})
+    state.setdefault("source_url", REMOTE_EXCLUDE_POOL_URL)
+    state.setdefault("edit_url", REMOTE_EXCLUDE_POOL_EDIT_URL)
+    state["cache_exists"] = EXCLUDE_POOL_CACHE_PATH.exists()
+    return state
+
+
+def sync_remote_exclude_pool(force=False, timeout=3.0):
+    ensure_dirs()
+    checked_at = now_text()
+    previous = read_json(EXCLUDE_POOL_SYNC_STATE_PATH, {})
+    try:
+        request = urllib.request.Request(
+            REMOTE_EXCLUDE_POOL_URL,
+            headers={
+                "User-Agent": "coin11-tb-mac-rule-sync/1",
+                "Cache-Control": "no-cache",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=float(timeout)) as response:
+            raw = response.read(262144)
+        payload = json.loads(raw.decode("utf-8"))
+        pool = _validate_remote_exclude_pool(payload)
+        digest = hashlib.sha256(raw).hexdigest()
+        changed = digest != previous.get("sha256")
+        applied = bool(force or changed or not RULES_PATH.exists())
+
+        atomic_write_json(EXCLUDE_POOL_CACHE_PATH, pool)
+        if applied:
+            current_rules = read_json(RULES_PATH, DEFAULT_RULES)
+            for key in REMOTE_EXCLUDE_POOL_KEYS:
+                if key in pool:
+                    current_rules[key] = pool[key]
+            current_rules["exclude_tags"] = list(
+                pool.get("coin_exclude_tags", current_rules.get("exclude_tags", []))
+            )
+            atomic_write_json(RULES_PATH, current_rules)
+
+        state = {
+            "ok": True,
+            "source_url": REMOTE_EXCLUDE_POOL_URL,
+            "edit_url": REMOTE_EXCLUDE_POOL_EDIT_URL,
+            "revision": pool.get("revision", ""),
+            "remote_updated_at": pool.get("updated_at", ""),
+            "sha256": digest,
+            "last_checked_at": checked_at,
+            "last_applied_at": checked_at if applied else previous.get("last_applied_at", ""),
+            "applied": applied,
+            "changed": changed,
+            "last_error": None,
+        }
+        atomic_write_json(EXCLUDE_POOL_SYNC_STATE_PATH, state)
+        return state
+    except Exception as exc:
+        state = dict(previous)
+        state.update(
+            {
+                "ok": False,
+                "source_url": REMOTE_EXCLUDE_POOL_URL,
+                "edit_url": REMOTE_EXCLUDE_POOL_EDIT_URL,
+                "last_checked_at": checked_at,
+                "applied": False,
+                "changed": False,
+                "last_error": f"{exc.__class__.__name__}: {exc}",
+            }
+        )
+        atomic_write_json(EXCLUDE_POOL_SYNC_STATE_PATH, state)
+        return state
 
 
 def read_json(path, default):
