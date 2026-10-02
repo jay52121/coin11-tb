@@ -1,9 +1,13 @@
+import base64
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import threading
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 
@@ -246,6 +250,147 @@ def sync_remote_exclude_pool(force=False, timeout=3.0):
         )
         atomic_write_json(EXCLUDE_POOL_SYNC_STATE_PATH, state)
         return state
+
+
+def _github_write_token():
+    for name in ("TJB_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        token = os.environ.get(name, "").strip()
+        if token:
+            return token, f"env:{name}"
+
+    if shutil.which("gh"):
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "token"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            )
+            token = result.stdout.strip()
+            if token:
+                return token, "gh auth token"
+        except Exception:
+            pass
+    return "", ""
+
+
+def push_local_exclude_pool_to_cloud(timeout=8.0):
+    token, token_source = _github_write_token()
+    if not token:
+        return {
+            "ok": False,
+            "error": (
+                "未找到GitHub写入凭据；请设置TJB_GITHUB_TOKEN/GH_TOKEN，"
+                "或先执行 gh auth login"
+            ),
+            "edit_url": REMOTE_EXCLUDE_POOL_EDIT_URL,
+        }
+
+    rules = read_rules()
+    pool = {
+        "schema_version": 1,
+        "revision": datetime.now().astimezone().strftime("%Y-%m-%d-%H%M%S"),
+        "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "coin_exclude_tags": _normalize_string_list(
+            rules.get("coin_exclude_tags", [])
+        ),
+        "energy_exclude_tags": _normalize_string_list(
+            rules.get("energy_exclude_tags", [])
+        ),
+        "skip_task_extra_words": _normalize_string_list(
+            rules.get("skip_task_extra_words", [])
+        ),
+        "notes": (
+            "Cloud source for exclusion rules shared by Mac and Android. "
+            "Only exclusion-related fields are remote-managed."
+        ),
+    }
+    raw = (
+        json.dumps(pool, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    api_url = (
+        "https://api.github.com/repos/jay52121/coin11-tb/"
+        "contents/cloud/exclude-pool.json"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "coin11-tb-mac-rule-push/1",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    try:
+        get_request = urllib.request.Request(
+            api_url + "?ref=main",
+            headers=headers,
+        )
+        with urllib.request.urlopen(
+            get_request,
+            timeout=float(timeout),
+        ) as response:
+            current = json.loads(response.read().decode("utf-8"))
+        current_sha = str(current.get("sha", "")).strip()
+        if not current_sha:
+            raise ValueError("GitHub未返回cloud/exclude-pool.json的sha")
+
+        request_body = json.dumps(
+            {
+                "message": (
+                    "chore: sync exclusion pool from Mac "
+                    + pool["revision"]
+                ),
+                "content": base64.b64encode(raw).decode("ascii"),
+                "sha": current_sha,
+                "branch": "main",
+            }
+        ).encode("utf-8")
+        put_request = urllib.request.Request(
+            api_url,
+            data=request_body,
+            headers={
+                **headers,
+                "Content-Type": "application/json",
+            },
+            method="PUT",
+        )
+        with urllib.request.urlopen(
+            put_request,
+            timeout=float(timeout),
+        ) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        digest = hashlib.sha256(raw).hexdigest()
+        atomic_write_json(EXCLUDE_POOL_CACHE_PATH, pool)
+        state = {
+            "ok": True,
+            "source_url": REMOTE_EXCLUDE_POOL_URL,
+            "edit_url": REMOTE_EXCLUDE_POOL_EDIT_URL,
+            "revision": pool["revision"],
+            "remote_updated_at": pool["updated_at"],
+            "sha256": digest,
+            "last_checked_at": now_text(),
+            "last_applied_at": now_text(),
+            "last_pushed_at": now_text(),
+            "applied": True,
+            "changed": True,
+            "last_error": None,
+            "push_auth": token_source,
+            "commit_sha": (
+                result.get("commit", {}).get("sha", "")
+                if isinstance(result, dict)
+                else ""
+            ),
+        }
+        atomic_write_json(EXCLUDE_POOL_SYNC_STATE_PATH, state)
+        return state
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "edit_url": REMOTE_EXCLUDE_POOL_EDIT_URL,
+            "push_auth": token_source,
+        }
 
 
 def read_json(path, default):
