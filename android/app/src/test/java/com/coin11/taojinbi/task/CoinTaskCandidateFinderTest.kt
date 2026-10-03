@@ -244,6 +244,99 @@ class CoinTaskCandidateFinderTest {
     }
 
     @Test
+    fun goodShopIsExplicitlyUnsupportedInDiagnostics() {
+        val observation = observation(
+            node(0, "逛好店赚一大波金币(0/1)", 100, 400, 760, 500),
+            node(1, "去逛逛", 900, 410, 1200, 500),
+        )
+
+        assertNull(
+            CoinTaskCandidateFinder.findNext(
+                observation,
+                clickCounts = emptyMap(),
+                invalidClickKeys = emptySet(),
+                policy = policy,
+            ),
+        )
+
+        val diagnostics = CoinTaskCandidateFinder.diagnoseRemaining(
+            observation = observation,
+            ocrSnapshot = null,
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )
+
+        assertTrue(
+            diagnostics.any {
+                it.reason == "unsupported_good_shop" &&
+                    it.taskKey.contains("逛好店")
+            },
+        )
+    }
+
+    @Test
+    fun diagnosticsExplainInvalidAndClickLimit() {
+        val observation = observation(
+            node(0, "天天签到免费拿IP周边(0/1)", 100, 400, 760, 500),
+            node(1, "去完成", 900, 410, 1200, 500),
+            node(2, "语音搜索得金币(0/1)", 100, 650, 760, 750),
+            node(3, "去完成", 900, 660, 1200, 750),
+        )
+        val first = CoinTaskCandidateFinder.findNext(
+            observation,
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy,
+        )!!
+
+        val diagnostics = CoinTaskCandidateFinder.diagnoseRemaining(
+            observation = observation,
+            ocrSnapshot = null,
+            clickCounts = mapOf(
+                "语音搜索得金币(0/1)" to 2,
+            ),
+            invalidClickKeys = setOf(first.clickKey),
+            policy = policy,
+        )
+
+        assertTrue(
+            diagnostics.any {
+                it.taskKey.contains("天天签到") &&
+                    it.reason == "invalid_click"
+            },
+        )
+        assertTrue(
+            diagnostics.any {
+                it.taskKey.contains("语音搜索") &&
+                    it.reason == "click_limit 2/2"
+            },
+        )
+    }
+
+    @Test
+    fun diagnosticsExposeMatchedExcludeWord() {
+        val observation = observation(
+            node(0, "去百度App领现金(0/1)", 100, 400, 760, 500),
+            node(1, "去完成", 900, 410, 1200, 500),
+        )
+
+        val diagnostics = CoinTaskCandidateFinder.diagnoseRemaining(
+            observation = observation,
+            ocrSnapshot = null,
+            clickCounts = emptyMap(),
+            invalidClickKeys = emptySet(),
+            policy = policy.copy(
+                excludeWords = policy.excludeWords + "百度",
+            ),
+        )
+
+        assertTrue(
+            diagnostics.any { it.reason == "excluded:百度" },
+        )
+    }
+
+    @Test
     fun usesSmallestClickableContainerForActionText() {
         val candidate = CoinTaskCandidateFinder.findNext(
             observation = observation(

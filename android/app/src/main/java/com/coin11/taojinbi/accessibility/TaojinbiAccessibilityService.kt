@@ -2056,6 +2056,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 }
             }
 
+            logRemainingTaskDiagnostics(
+                observation = observation,
+                ocrSnapshot = ocrSnapshot,
+            )
             completeOneBrowse(
                 success = true,
                 message =
@@ -2089,6 +2093,38 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         invalidCoinTaskClickKeys.clear()
         oneBrowseTaskListScrolls = 0
         restartCoinHomeForMainline(observation.id)
+    }
+
+    private fun logRemainingTaskDiagnostics(
+        observation: com.coin11.taojinbi.observation.Observation,
+        ocrSnapshot: OcrSnapshot?,
+    ) {
+        val rejections = CoinTaskCandidateFinder.diagnoseRemaining(
+            observation = observation,
+            ocrSnapshot = ocrSnapshot,
+            clickCounts = coinTaskClickCounts,
+            invalidClickKeys = invalidCoinTaskClickKeys,
+            policy = coinTaskPolicy(),
+            limit = 12,
+        )
+        if (rejections.isEmpty()) {
+            oneBrowseLog("DONE诊断：未发现可解释的未完成任务行")
+            return
+        }
+
+        oneBrowseLog(
+            "DONE诊断：剩余任务 " + rejections.size + " 条（最多记录12条）",
+        )
+        rejections.forEach { item ->
+            oneBrowseLog(
+                "DONE剩余任务 source=" + item.source +
+                    " reason=" + item.reason +
+                    " key=" + item.taskKey +
+                    " action=" + item.actionText +
+                    " bounds=" + item.bounds +
+                    " context=" + item.contextText.take(180),
+            )
+        }
     }
 
     private fun restartCoinHomeForMainline(sourceObservationId: Long) {
@@ -2173,6 +2209,10 @@ class TaojinbiAccessibilityService : AccessibilityService() {
         }
         oneBrowseLog(
             "任务未进入，标记invalid：" + reason +
+                " task=" + oneBrowseTaskDescription +
+                " key=" + currentCoinTaskKey +
+                " clicks=" + (coinTaskClickCounts[currentCoinTaskKey] ?: 0) +
+                "/" + currentCoinTaskClickLimit +
                 " clickKey=" + currentCoinTaskClickKey,
         )
         skippedCoinTasks += 1
