@@ -30,16 +30,16 @@ data class CoinTaskCandidate(
     val source: String = "xml",
 )
 
-object CoinTaskCandidateFinder {
+data class CoinTaskRejection(
+    val taskKey: String,
+    val contextText: String,
+    val actionText: String,
+    val source: String,
+    val reason: String,
+    val bounds: IntRect?,
+)
 
-    private val intrinsicExcludedContextWords = listOf(
-        "答题",
-        "趣味",
-        "订阅",
-        "关注",
-        "游戏",
-        "捐",
-    )
+object CoinTaskCandidateFinder {
 
     fun findNext(
         observation: Observation,
@@ -144,6 +144,203 @@ object CoinTaskCandidateFinder {
                     .thenBy { it.bounds.left },
             )
             .firstOrNull()
+    }
+
+    fun diagnoseRemaining(
+        observation: Observation,
+        ocrSnapshot: OcrSnapshot?,
+        clickCounts: Map<String, Int>,
+        invalidClickKeys: Set<String>,
+        policy: CoinTaskPolicy,
+        limit: Int = 12,
+    ): List<CoinTaskRejection> {
+        val results = mutableListOf<CoinTaskRejection>()
+        val seen = linkedSetOf<String>()
+        val nodes = observation.nodes
+            .filter { it.enabled && hasUsableBounds(it.bounds) }
+        val actionRegex = safeRegex(policy.actionTextPattern)
+        val rewardRegex = safeRegex(policy.rewardButtonPattern)
+
+        nodes.asSequence()
+            .filter { nodeText(it).isNotBlank() }
+            .filter { actionRegex.containsMatchIn(nodeText(it)) }
+            .forEach { node ->
+                val action = nodeText(node)
+                val context = rowContext(nodes, node).ifBlank { action }
+                val bounds =
+                    smallestClickableContainer(nodes, node.bounds) ?: node.bounds
+                val rejection = diagnoseCandidate(
+                    action = action,
+                    context = context,
+                    bounds = bounds,
+                    source = "xml",
+                    clickCounts = clickCounts,
+                    invalidClickKeys = invalidClickKeys,
+                    policy = policy,
+                    rewardRegex = rewardRegex,
+                )
+                results += rejection
+                seen += rejection.taskKey
+            }
+
+        nodes.asSequence()
+            .filter { incompleteProgress(nodeText(it)) }
+            .forEach { node ->
+                val context = rowContextAround(nodes, node)
+                val key = taskClickKey(context.ifBlank { nodeText(node) })
+                if (key !in seen) {
+                    val reason =
+                        unsupportedSpecialReason(context)
+                            ?: matchedExcludeRuleWord(
+                                context,
+                                policy.excludeWords,
+                            )?.let { "excluded:$it" }
+                            ?: "action_unrecognized"
+                    results += CoinTaskRejection(
+                        taskKey = key,
+                        contextText = context,
+                        actionText = "(none)",
+                        source = "xml-row",
+                        reason = reason,
+                        bounds = node.bounds,
+                    )
+                    seen += key
+                }
+            }
+
+        if (ocrSnapshot != null) {
+            val width = ocrSnapshot.screenshotWidth.coerceAtLeast(1)
+            ocrSnapshot.lines.asSequence()
+                .filter { it.bounds != null }
+                .filter { line ->
+                    val bounds = line.bounds!!
+                    val xCenter =
+                        bounds.left + (bounds.right - bounds.left) / 2
+                    xCenter >= (width * 0.65f).toInt() &&
+                        actionRegex.containsMatchIn(line.text)
+                }
+                .forEach { line ->
+                    val bounds = line.bounds ?: return@forEach
+                    val actionCenterY = centerY(bounds)
+                    val context = ocrSnapshot.lines
+                        .asSequence()
+                        .filter { it.bounds != null }
+                        .filter { other ->
+                            val otherBounds = other.bounds!!
+                            val otherCenterX =
+                                otherBounds.left +
+                                    (otherBounds.right - otherBounds.left) / 2
+                            abs(centerY(otherBounds) - actionCenterY) <=
+                                OCR_ROW_Y_TOLERANCE &&
+                                otherCenterX < (width * 0.78f).toInt()
+                        }
+                        .map { it.text.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .joinToString(" ")
+
+                    val rejection = diagnoseCandidate(
+                        action = line.text,
+                        context = context.ifBlank { line.text },
+                        bounds = bounds,
+                        source = "ocr",
+                        clickCounts = clickCounts,
+                        invalidClickKeys = invalidClickKeys,
+                        policy = policy,
+                        rewardRegex = rewardRegex,
+                    )
+                    if (rejection.taskKey !in seen) {
+                        results += rejection
+                        seen += rejection.taskKey
+                    }
+                }
+
+            ocrSnapshot.lines.asSequence()
+                .filter { it.bounds != null && incompleteProgress(it.text) }
+                .forEach { line ->
+                    val bounds = line.bounds ?: return@forEach
+                    val center = centerY(bounds)
+                    val context = ocrSnapshot.lines
+                        .asSequence()
+                        .filter { it.bounds != null }
+                        .filter {
+                            abs(centerY(it.bounds!!) - center) <=
+                                OCR_ROW_Y_TOLERANCE
+                        }
+                        .map { it.text.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .joinToString(" ")
+                    val key = taskClickKey(context.ifBlank { line.text })
+                    if (key !in seen) {
+                        val reason =
+                            unsupportedSpecialReason(context)
+                                ?: matchedExcludeRuleWord(
+                                    context,
+                                    policy.excludeWords,
+                                )?.let { "excluded:$it" }
+                                ?: "action_unrecognized"
+                        results += CoinTaskRejection(
+                            taskKey = key,
+                            contextText = context,
+                            actionText = "(none)",
+                            source = "ocr-row",
+                            reason = reason,
+                            bounds = bounds,
+                        )
+                        seen += key
+                    }
+                }
+        }
+
+        return results.take(limit)
+    }
+
+    private fun diagnoseCandidate(
+        action: String,
+        context: String,
+        bounds: IntRect,
+        source: String,
+        clickCounts: Map<String, Int>,
+        invalidClickKeys: Set<String>,
+        policy: CoinTaskPolicy,
+        rewardRegex: Regex,
+    ): CoinTaskRejection {
+        val key = taskClickKey(context)
+        val kind =
+            if (rewardRegex.containsMatchIn(action)) {
+                CoinTaskKind.REWARD
+            } else {
+                CoinTaskKind.BROWSE
+            }
+        val clickLimit =
+            if (kind == CoinTaskKind.REWARD) 2 else taskClickLimit(context)
+        val clickKey = source + ":" + key + ":" + bounds
+        val unsupported = unsupportedSpecialReason(context)
+        val excluded = matchedExcludeRuleWord(context, policy.excludeWords)
+        val reason = when {
+            !isSafeClickBounds(bounds) -> "unsafe_bounds"
+            unsupported != null -> unsupported
+            excluded != null -> "excluded:" + excluded
+            taskIsDone(
+                context,
+                policy.doneWords,
+                policy.doneExcludeWords,
+            ) -> "already_done"
+            clickKey in invalidClickKeys -> "invalid_click"
+            (clickCounts[key] ?: 0) >= clickLimit ->
+                "click_limit " +
+                    (clickCounts[key] ?: 0) + "/" + clickLimit
+            else -> "executable_unselected"
+        }
+        return CoinTaskRejection(
+            taskKey = key,
+            contextText = context,
+            actionText = action,
+            source = source,
+            reason = reason,
+            bounds = bounds,
+        )
     }
 
     fun taskIsDone(
@@ -375,7 +572,7 @@ object CoinTaskCandidateFinder {
         }
 
         if (
-            intrinsicExcludedContextWords.any { context.contains(it) } ||
+            unsupportedSpecialReason(context) != null ||
             excludedByRuleWords(context, policy.excludeWords) ||
             taskIsDone(context, policy.doneWords, policy.doneExcludeWords)
         ) {
@@ -510,37 +707,80 @@ object CoinTaskCandidateFinder {
             outer.right >= inner.right &&
             outer.bottom >= inner.bottom
 
-    private fun excludedByRuleWords(
+    private fun unsupportedSpecialReason(
+        context: String,
+    ): String? = when {
+        context.contains("逛好店") -> "unsupported_good_shop"
+        context.contains("订阅") || context.contains("关注") ->
+            "unsupported_shop_subscribe"
+        context.contains("答题") || context.contains("趣味") ->
+            "unsupported_quiz"
+        context.contains("游戏") -> "unsupported_game"
+        context.contains("捐") -> "unsupported_donation"
+        else -> null
+    }
+
+    private fun matchedExcludeRuleWord(
         context: String,
         excludeWords: List<String>,
-    ): Boolean {
+    ): String? {
         val skipSource = SHARE_BONUS_NOISE_REGEX.replace(context, "")
         val compactTask = normalizeForRule(skipSource)
         val compactWords = excludeWords
-            .map(::normalizeForRule)
-            .filter { it.isNotBlank() }
+            .map { original -> original to normalizeForRule(original) }
+            .filter { it.second.isNotBlank() }
 
         if (
-            "uc" in compactWords &&
+            compactWords.any { it.second == "uc" } &&
             Regex("去逛0[6g]送红包福利").containsMatchIn(compactTask)
         ) {
-            return true
+            return compactWords
+                .firstOrNull { it.second == "uc" }
+                ?.first
         }
 
         val hasBrowseStep =
             Regex("浏览\\d{1,3}秒|点击去逛").containsMatchIn(compactTask)
 
-        for (word in compactWords) {
+        for ((original, word) in compactWords) {
             if (!compactTask.contains(word)) {
                 continue
             }
             if (word.contains("下单") && hasBrowseStep) {
                 continue
             }
-            return true
+            return original
         }
-        return false
+        return null
     }
+
+    private fun incompleteProgress(text: String): Boolean {
+        val match = PROGRESS_COUNT_REGEX.find(text) ?: return false
+        val current = match.groupValues[1].toIntOrNull() ?: return false
+        val total = match.groupValues[2].toIntOrNull() ?: return false
+        return current < total
+    }
+
+    private fun rowContextAround(
+        nodes: List<NodeSnapshot>,
+        anchor: NodeSnapshot,
+    ): String {
+        val center = centerY(anchor.bounds)
+        return nodes
+            .asSequence()
+            .filter { abs(centerY(it.bounds) - center) <= ROW_Y_TOLERANCE }
+            .map(::nodeText)
+            .filter { it.isNotBlank() }
+            .filterNot { it.startsWith("O1CN") }
+            .distinct()
+            .joinToString(" ")
+    }
+
+    private fun excludedByRuleWords(
+        context: String,
+        excludeWords: List<String>,
+    ): Boolean =
+        matchedExcludeRuleWord(context, excludeWords) != null
 
     private fun safeRegex(pattern: String): Regex =
         runCatching { Regex(pattern) }
