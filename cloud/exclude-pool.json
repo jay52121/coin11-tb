@@ -1,15 +1,14 @@
 {
   "schema_version": 1,
-  "revision": "2026-10-03-133126",
-  "updated_at": "2026-10-03T13:31:26+08:00",
+  "revision": "2026-10-03-133729",
+  "updated_at": "2026-10-03T13:37:29+08:00",
   "coin_exclude_tags": [
     "下单",
     "快手",
     "评价",
     "助力",
     "头条",
-    "百度",
-    "CLOUD_SYNC_TEST_RUNNING"
+    "百度"
   ],
   "energy_exclude_tags": [
     "下单",
