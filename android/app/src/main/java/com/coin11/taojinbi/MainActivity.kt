@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var capabilityOutput: TextView
     private lateinit var recognitionOutput: TextView
     private lateinit var ocrOutput: TextView
+    private lateinit var mainlineStatus: TextView
     private lateinit var snapshotSummary: TextView
 
     private lateinit var nodeDump: TextView
@@ -195,6 +196,44 @@ class MainActivity : Activity() {
             )
         }
 
+        addSectionTitle(content, "淘金币主线")
+
+        mainlineStatus = TextView(this).apply {
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(0, 0, 0, dp(8))
+        }
+        content.addView(mainlineStatus)
+
+        addButton(content, "开始淘金币 · user 999") {
+            val message =
+                TaojinbiAccessibilityService.startCoinMainlineFromUi(
+                    context = this,
+                    targetUserId = 999,
+                )
+            CapabilityState.publish("淘金币主线", message)
+            render(ObserverState.latestExternalObservation)
+        }
+
+        addButton(content, "停止淘金币") {
+            val message =
+                TaojinbiAccessibilityService.stopCoinMainlineFromUi(this)
+            CapabilityState.publish("淘金币停止", message)
+            render(ObserverState.latestExternalObservation)
+        }
+
+        addButton(content, "同步云端排除词") {
+            val message =
+                TaojinbiAccessibilityService.syncRemoteRulesFromUi()
+            CapabilityState.publish("排除词同步", message)
+            render(ObserverState.latestExternalObservation)
+        }
+
+        addButton(content, "刷新主线状态") {
+            render(ObserverState.latestExternalObservation)
+        }
+
         addSectionTitle(content, "Shizuku / 高权限能力")
 
         addButton(content, "刷新 Shizuku 状态") {
@@ -349,6 +388,8 @@ class MainActivity : Activity() {
         }
 
         shizukuStatus.text = "Shizuku：\n${ShizukuBridge.statusText()}"
+        mainlineStatus.text =
+            TaojinbiAccessibilityService.coinMainlineStatusText()
         capabilityOutput.text = CapabilityState.render()
         ocrOutput.text = OcrState.latest?.debugText(maxLines = 16) ?: "暂无 OCR 快照。"
 

@@ -3497,6 +3497,39 @@ class TaojinbiAccessibilityService : AccessibilityService() {
                 true
             } ?: false
 
+        fun startCoinMainlineFromUi(
+            context: Context,
+            targetUserId: Int = 999,
+        ): String {
+            val queued = debugQueueCoinMainline(
+                context = context,
+                targetUserId = targetUserId,
+            )
+            if (!queued.contains("queued")) {
+                return queued
+            }
+
+            val launch = ShizukuBridge.openCoinAsUserWhenReady(
+                targetUserId,
+                COIN_HOME_URL,
+            )
+            return if (launch.accepted) {
+                queued + "; " + launch.detail
+            } else {
+                debugClearQueuedCoinMainline(context)
+                "rejected run_coin_mainline: " + launch.detail
+            }
+        }
+
+        fun stopCoinMainlineFromUi(context: Context): String =
+            debugStopCoinMainline(context)
+
+        fun syncRemoteRulesFromUi(): String =
+            debugSyncRemoteRules()
+
+        fun coinMainlineStatusText(): String =
+            debugStatusText()
+
         fun debugStatusText(): String {
             val observation = ObserverState.latestExternalObservation
             val recognition = RecognitionState.latest

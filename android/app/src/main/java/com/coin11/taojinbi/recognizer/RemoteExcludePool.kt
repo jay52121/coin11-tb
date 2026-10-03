@@ -112,7 +112,7 @@ object RemoteExcludePool {
         var lastError: Throwable? = null
         sourceUrls.forEach { sourceUrl ->
             try {
-                val bytes = fetch(sourceUrl)
+                val bytes = fetch(withCacheBuster(sourceUrl))
                 val text = bytes.toString(Charsets.UTF_8)
                 val json = JSONObject(text)
                 overlayFromJson(RuleSet.DEFAULT, json)
@@ -171,6 +171,14 @@ object RemoteExcludePool {
             ok = false,
             error = message,
         )
+    }
+
+    internal fun withCacheBuster(
+        sourceUrl: String,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): String {
+        val separator = if (sourceUrl.contains("?")) "&" else "?"
+        return sourceUrl + separator + "v=" + nowMillis
     }
 
     private fun fetch(sourceUrl: String): ByteArray {
